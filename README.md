@@ -10,6 +10,10 @@
   Three.js · WebGPU · WebLLM · Yjs · Hocuspocus · IndexedDB
 </p>
 
+<p align="center">
+  <a href="https://localmesh-studio.okorion.chatgpt.site"><strong>공개 데모 열기</strong></a>
+</p>
+
 ![LocalMesh Studio 편집기 전체 화면](docs/images/localmesh-studio-editor.png)
 
 ## 제품 개요
@@ -44,6 +48,12 @@ flowchart LR
 ```
 
 Yjs는 충돌 없는 공유 문서와 병합 규칙을 제공합니다. 실제 소켓 연결은 Yjs 내부 기능이 아니라 `@hocuspocus/provider`와 별도 Hocuspocus 서버가 담당합니다.
+
+## 공개 데모
+
+[https://localmesh-studio.okorion.chatgpt.site](https://localmesh-studio.okorion.chatgpt.site)
+
+공개 버전은 별도 협업 소켓을 연결하지 않은 로컬 저장 모드입니다. 방문자의 장면과 로컬 AI 프롬프트는 각 브라우저 안에서 처리됩니다.
 
 ## 빠른 시작
 

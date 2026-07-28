@@ -14,13 +14,15 @@
   --success: #22a873;
   --danger: #d65353;
   --shadow: 0 12px 36px rgb(31 35 48 / 8%);
+  --font-app-sans: "Segoe UI", "Pretendard", "Noto Sans KR", Arial, sans-serif;
+  --font-app-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-app-sans);
+  --font-mono: var(--font-app-mono);
 }
 
 * {
@@ -39,7 +41,7 @@ body {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), "Pretendard", "Noto Sans KR", Arial, sans-serif;
+  font-family: var(--font-app-sans);
   font-size: 13px;
 }
 
@@ -182,7 +184,7 @@ textarea:focus-visible {
   border: 2px solid white;
   border-radius: 50%;
   color: white;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 700;
 }
 
@@ -263,7 +265,7 @@ textarea:focus-visible {
 
 .eyebrow {
   color: #9197a6;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 750;
   letter-spacing: 0.13em;
 }
@@ -357,7 +359,7 @@ textarea:focus-visible {
 
 .tree-select small {
   color: #969cab;
-  font-size: 9px;
+  font-size: 10px;
   text-transform: uppercase;
 }
 
@@ -405,7 +407,7 @@ textarea:focus-visible {
   border-top: 1px solid var(--border);
   background: #fbfcfe;
   color: #858b99;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.45;
 }
 
@@ -448,7 +450,7 @@ textarea:focus-visible {
   border-radius: 7px;
   background: rgb(255 255 255 / 78%);
   color: #7b8292;
-  font-size: 9px;
+  font-size: 10px;
   backdrop-filter: blur(10px);
 }
 
@@ -466,7 +468,7 @@ textarea:focus-visible {
   border-radius: 9px;
   background: rgb(255 255 255 / 72%);
   color: #818899;
-  font-size: 7px;
+  font-size: 8px;
   box-shadow: 0 5px 16px rgb(31 35 48 / 8%);
   backdrop-filter: blur(9px);
 }
@@ -474,7 +476,7 @@ textarea:focus-visible {
 .view-cube strong {
   margin-top: 2px;
   color: #596071;
-  font-size: 8px;
+  font-size: 9px;
 }
 
 .property-section {
@@ -498,7 +500,7 @@ textarea:focus-visible {
   align-items: center;
   margin-top: 9px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .property-row > input,
@@ -546,7 +548,7 @@ textarea:focus-visible {
 .vector-field legend {
   margin-bottom: 6px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .axis-inputs {
@@ -574,7 +576,7 @@ textarea:focus-visible {
   top: 8px;
   left: 7px;
   z-index: 1;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 750;
 }
 
@@ -592,14 +594,14 @@ textarea:focus-visible {
   grid-template-columns: 65px minmax(0, 1fr);
   gap: 7px;
   margin-top: 8px;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .metadata-section dt { color: var(--muted); }
 .metadata-section dd {
   overflow: hidden;
   color: #606778;
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-app-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -651,7 +653,7 @@ textarea:focus-visible {
   align-items: center;
   overflow: hidden;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -670,7 +672,7 @@ textarea:focus-visible {
   border: 1px solid var(--border-strong);
   border-radius: 9px;
   background: #fbfcfe;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -684,7 +686,7 @@ textarea:focus-visible {
   border-radius: 8px;
   background: var(--primary);
   color: white;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 650;
 }
 
@@ -710,7 +712,7 @@ textarea:focus-visible {
   border-radius: 999px;
   background: white;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .prompt-examples button:hover {
@@ -722,7 +724,7 @@ textarea:focus-visible {
 .ai-error {
   grid-column: 2;
   margin: -1px 0 0;
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .ai-privacy-note { color: #969cab; }
@@ -749,7 +751,7 @@ textarea:focus-visible {
   z-index: 1;
   margin: 5px 8px;
   color: #6155bd;
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .ai-preview {
@@ -766,7 +768,7 @@ textarea:focus-visible {
 
 .ai-preview strong {
   color: #554b9f;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .ai-preview ul {
@@ -775,7 +777,7 @@ textarea:focus-visible {
   margin: 4px 0 0;
   padding: 0;
   color: #7c73ae;
-  font-size: 8px;
+  font-size: 10px;
   list-style: none;
 }
 
@@ -799,5 +801,29 @@ textarea:focus-visible {
   .prompt-examples,
   .ai-privacy-note {
     display: none;
+  }
+}
+
+@media (max-width: 1240px) {
+  .topbar {
+    grid-template-columns: 220px 1fr auto;
+  }
+
+  .editor-workspace {
+    grid-template-columns: 220px minmax(460px, 1fr) 272px;
+  }
+
+  .ai-panel {
+    gap-inline: 10px;
+    padding-inline: 12px;
+  }
+
+  .panel-heading {
+    padding-inline: 15px;
+  }
+
+  .primitive-grid {
+    gap: 6px;
+    padding-inline: 11px;
   }
 }

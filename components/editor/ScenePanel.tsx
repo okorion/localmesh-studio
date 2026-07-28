@@ -69,7 +69,7 @@ export function ScenePanel({
       </div>
       <div className="panel-note">
         <span className="note-dot" />
-        이 목록의 변경은 Yjs 문서에 바로 기록됩니다.
+        변경은 Yjs 문서에 바로 기록됩니다.
       </div>
     </aside>
   );

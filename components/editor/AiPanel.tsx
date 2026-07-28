@@ -22,6 +22,7 @@ type Preview = {
 };
 
 const EXAMPLES = ["보라색 구를 오른쪽에 추가해줘", "Starter Cube를 두 배로 키워줘"];
+const DISPLAY_LOCAL_MODEL = "Qwen3 0.6B";
 
 function describeCommand(command: SceneCommand, objects: SceneObject[]): string {
   if (command.type === "object.create") {
@@ -66,7 +67,9 @@ export function AiPanel({ objects, onApply }: AiPanelProps) {
         <span className="ai-icon"><Bot size={17} /></span>
         <div>
           <strong>로컬 AI 편집</strong>
-          <span><Cpu size={12} /> WebGPU · {DEFAULT_LOCAL_MODEL}</span>
+          <span title={`WebGPU · ${DEFAULT_LOCAL_MODEL}`}>
+            <Cpu size={12} /> {DISPLAY_LOCAL_MODEL}
+          </span>
         </div>
       </div>
       <div className="ai-composer">

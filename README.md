@@ -1,13 +1,13 @@
 # LocalMesh Studio
 
-> 브라우저에서 3D 장면을 편집하고, 로컬 LLM에게 자연어로 오브젝트 생성을 요청하며, Yjs 문서를 여러 사용자와 동기화할 수 있는 로컬 우선 3D 에디터입니다.
+> React·TypeScript로 구현한 실험형 3D Studio 사이드 프로젝트입니다. 브라우저에서 3D 장면과 로컬 LLM 명령을 다루고, 로컬 개발 환경에서는 Yjs·Hocuspocus 기반 동기화 흐름을 확인할 수 있습니다.
 
 <p align="center">
   <img src="public/og.png" alt="LocalMesh Studio — Local AI, WebGPU, Yjs" width="100%" />
 </p>
 
 <p align="center">
-  Three.js · WebGPU · WebLLM · Yjs · Hocuspocus · IndexedDB
+  TypeScript · React · Three.js · WebGPU · WebLLM · Yjs · Hocuspocus · IndexedDB
 </p>
 
 <p align="center">
@@ -16,9 +16,12 @@
 
 ![LocalMesh Studio 편집기 전체 화면](docs/images/localmesh-studio-editor.png)
 
+> [!NOTE]
+> 공개 데모는 Yjs 문서를 브라우저의 IndexedDB에 저장하는 로컬 모드입니다. 다중 사용자 동기화는 로컬 Hocuspocus 서버를 함께 실행했을 때 확인할 수 있으며, 현재 서버는 인증·룸 접근 제어·서버 영속 저장을 갖춘 운영 구성이 아닙니다.
+
 ## 제품 개요
 
-LocalMesh Studio는 3D 편집, AI 명령, 로컬 저장, 실시간 협업이 서로 다른 데이터 모델을 만들지 않도록 설계했습니다. 사용자의 UI 입력과 로컬 AI 출력은 모두 `SceneCommand`로 정규화되고, `SceneDocument`가 단일 Yjs 문서에 적용합니다. Three.js 뷰포트와 협업 사용자는 같은 문서의 변경을 구독합니다.
+LocalMesh Studio는 3D 편집, AI 명령, 로컬 저장, 실시간 협업 실험이 서로 다른 데이터 모델을 만들지 않도록 설계했습니다. 사용자의 UI 입력과 로컬 AI 출력은 모두 `SceneCommand`로 정규화되고, `SceneDocument`가 단일 Yjs 문서에 적용합니다. Three.js 뷰포트와 로컬 Hocuspocus 서버의 같은 룸에 연결된 클라이언트가 같은 문서의 변경을 구독합니다.
 
 현재 버전은 Cube, Sphere, Cylinder 생성과 이름·색상·Transform 편집, 실행 취소·다시 실행, JSON 내보내기를 지원합니다.
 
@@ -30,7 +33,7 @@ LocalMesh Studio는 3D 편집, AI 명령, 로컬 저장, 실시간 협업이 서
 | 로컬 AI 명령 | WebLLM의 `Qwen3-0.6B` 모델이 Web Worker에서 실행됩니다. 프롬프트와 장면 문맥을 외부 AI API로 보내지 않습니다. |
 | 안전한 AI 적용 | 모델 응답을 Zod 스키마로 검증하고, 장면 명령 미리보기를 사용자가 승인한 뒤 적용합니다. |
 | 로컬 우선 저장 | `y-indexeddb`가 브라우저에 Yjs 문서를 저장하므로 새로고침하거나 다시 열어도 장면을 복구합니다. |
-| 실시간 협업 | Hocuspocus Provider와 별도 WebSocket 서버가 같은 Yjs 문서를 사용자 사이에 전달합니다. |
+| 실시간 협업 실험 | 로컬 개발 환경에서 Hocuspocus Provider와 별도 WebSocket 서버가 같은 Yjs 문서를 클라이언트 사이에 전달합니다. |
 | 공급자 확장 | `SceneAiProvider` 경계를 통해 로컬 모델을 기본으로 유지하면서 외부 API 공급자를 추가할 수 있습니다. |
 
 ## 동작 구조

@@ -2,7 +2,7 @@
 
 ## 한 문장 구조
 
-사용자와 AI가 `SceneCommand`를 만들고, `SceneDocument`가 Yjs 문서에 적용하면, Three.js 화면과 다른 협업 사용자가 같은 변경을 구독합니다.
+사용자와 AI가 `SceneCommand`를 만들고, `SceneDocument`가 Yjs 문서에 적용하면, Three.js 화면과 로컬 Hocuspocus 서버의 같은 룸에 연결된 클라이언트가 같은 변경을 구독합니다.
 
 ```text
 User UI ─┐
@@ -11,12 +11,14 @@ Local AI ┘                                         ├─> IndexedDB
                                                    └─> Hocuspocus WebSocket
 ```
 
+> 이 문서는 현재 구현된 로컬 협업 경로를 설명합니다. 공개 데모에는 협업 소켓이 연결되지 않으며, 인증·룸 접근 제어·서버 영속 저장을 포함한 운영용 협업 아키텍처는 아직 범위 밖입니다.
+
 ## 데이터 소유권
 
 - Yjs `SceneDocument`: 저장하고 공유해야 하는 오브젝트 데이터의 유일한 원본
 - React 상태: 선택, 패널 열림처럼 저장할 필요가 없는 화면 상태
 - Three.js `Scene`: Yjs 데이터를 그리기 위해 파생된 런타임 표현
-- Hocuspocus 서버: Yjs 업데이트를 전달하는 소켓 경계
+- Hocuspocus 서버: 로컬 개발 환경에서 Yjs 업데이트를 전달하는 소켓 경계
 
 Three.js Mesh를 직접 저장하거나 React 상태와 Yjs 상태를 양방향 복제하지 않습니다. 이 규칙이 데이터 불일치와 수정 위치의 모호함을 막습니다.
 

@@ -3,16 +3,26 @@ import {
   sceneCommandSchema,
   type CommandOrigin,
   type SceneCommand,
+  type SceneObjectUpdates,
 } from "./commands";
 import {
   createSceneObject,
   sceneObjectSchema,
   type SceneObject,
+  type Vector3Tuple,
 } from "./schema";
 
 const OBJECTS_KEY = "scene.objects";
 const META_KEY = "scene.meta";
 const INITIAL_OBJECT_ID = "localmesh-initial-cube";
+const VECTOR_FIELDS = ["position", "rotation", "scale"] as const;
+const VECTOR_AXES = ["x", "y", "z"] as const;
+
+type VectorField = (typeof VECTOR_FIELDS)[number];
+
+function isVectorField(key: string): key is VectorField {
+  return VECTOR_FIELDS.includes(key as VectorField);
+}
 
 export class SceneDocument {
   readonly doc: Y.Doc;
@@ -72,9 +82,7 @@ export class SceneDocument {
 
       const objectMap = this.objects.get(parsed.objectId);
       if (!objectMap) return;
-      for (const [key, value] of Object.entries(parsed.updates)) {
-        objectMap.set(key, Array.isArray(value) ? [...value] : value);
-      }
+      this.applyObjectUpdates(objectMap, parsed.updates);
     }, origin);
 
     this.undoManager.stopCapturing();
@@ -91,9 +99,7 @@ export class SceneDocument {
         } else {
           const objectMap = this.objects.get(parsed.objectId);
           if (!objectMap) continue;
-          for (const [key, value] of Object.entries(parsed.updates)) {
-            objectMap.set(key, Array.isArray(value) ? [...value] : value);
-          }
+          this.applyObjectUpdates(objectMap, parsed.updates);
         }
       }
     }, origin);
@@ -124,9 +130,11 @@ export class SceneDocument {
   private refreshSnapshot(): void {
     const next: SceneObject[] = [];
     for (const objectMap of this.objects.values()) {
-      const parsed = sceneObjectSchema.safeParse(
-        Object.fromEntries(objectMap.entries()),
-      );
+      const values = Object.fromEntries(objectMap.entries());
+      for (const field of VECTOR_FIELDS) {
+        values[field] = this.resolveVector(objectMap, field);
+      }
+      const parsed = sceneObjectSchema.safeParse(values);
       if (parsed.success) next.push(parsed.data);
     }
     this.snapshot = next.toSorted((a, b) => a.createdAt - b.createdAt);
@@ -138,5 +146,38 @@ export class SceneDocument {
       map.set(key, Array.isArray(value) ? [...value] : value);
     }
     return map;
+  }
+
+  private applyObjectUpdates(
+    objectMap: Y.Map<unknown>,
+    updates: SceneObjectUpdates,
+  ): void {
+    for (const [key, value] of Object.entries(updates)) {
+      if (isVectorField(key) && Array.isArray(value)) {
+        const current = this.resolveVector(objectMap, key);
+        const next = value as Vector3Tuple;
+        for (const [index, axis] of VECTOR_AXES.entries()) {
+          if (current[index] !== next[index]) {
+            objectMap.set(`${key}.${axis}`, next[index]);
+          }
+        }
+        continue;
+      }
+      objectMap.set(key, value);
+    }
+  }
+
+  private resolveVector(
+    objectMap: Y.Map<unknown>,
+    field: VectorField,
+  ): [unknown, unknown, unknown] {
+    const legacy = objectMap.get(field);
+    const base = Array.isArray(legacy) ? legacy : [];
+    return VECTOR_AXES.map((axis, index) => {
+      const componentKey = `${field}.${axis}`;
+      return objectMap.has(componentKey)
+        ? objectMap.get(componentKey)
+        : base[index];
+    }) as [unknown, unknown, unknown];
   }
 }

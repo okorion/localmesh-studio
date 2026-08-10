@@ -4,6 +4,8 @@ import type { PrimitiveKind, SceneObject } from "@/features/scene/schema";
 type ScenePanelProps = {
   objects: SceneObject[];
   selectedId: string | null;
+  announcement: { id: number; message: string } | null;
+  deleteDisabled: boolean;
   onSelect: (objectId: string | null) => void;
   onAdd: (kind: PrimitiveKind) => void;
   onDelete: (objectId: string) => void;
@@ -18,12 +20,17 @@ const PRIMITIVES = [
 export function ScenePanel({
   objects,
   selectedId,
+  announcement,
+  deleteDisabled,
   onSelect,
   onAdd,
   onDelete,
 }: ScenePanelProps) {
   return (
     <aside className="side-panel scene-panel">
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement ? <span key={announcement.id}>{announcement.message}</span> : null}
+      </p>
       <div className="panel-heading">
         <div>
           <span className="eyebrow">SCENE</span>
@@ -33,7 +40,12 @@ export function ScenePanel({
       </div>
       <div className="primitive-grid" aria-label="프리미티브 추가">
         {PRIMITIVES.map(({ kind, label, icon: Icon }) => (
-          <button key={kind} type="button" onClick={() => onAdd(kind)}>
+          <button
+            key={kind}
+            type="button"
+            data-add-primitive={kind}
+            onClick={() => onAdd(kind)}
+          >
             <Icon size={18} />
             <span>{label}</span>
           </button>
@@ -49,11 +61,13 @@ export function ScenePanel({
               key={object.id}
               role="treeitem"
               aria-selected={selectedId === object.id}
+              data-scene-object-row={object.id}
             >
               <button
                 className="tree-select"
                 type="button"
                 aria-pressed={selectedId === object.id}
+                data-scene-object-select={object.id}
                 onClick={() => onSelect(selectedId === object.id ? null : object.id)}
               >
                 <span className="object-color" style={{ backgroundColor: object.color }} />
@@ -65,6 +79,7 @@ export function ScenePanel({
                 type="button"
                 onClick={() => onDelete(object.id)}
                 aria-label={`${object.name} 삭제`}
+                disabled={deleteDisabled}
               >
                 <Trash2 size={15} />
               </button>

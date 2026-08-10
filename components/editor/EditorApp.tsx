@@ -13,10 +13,10 @@ import { SceneViewport, type TransformMode } from "./SceneViewport";
 import { TopBar } from "./TopBar";
 
 const ROOM_ID = "localmesh-demo";
-const TRANSFORM_MODE_BY_CODE: Partial<Record<string, TransformMode>> = {
-  KeyW: "translate",
-  KeyE: "rotate",
-  KeyR: "scale",
+const TRANSFORM_MODE_BY_KEY: Partial<Record<string, TransformMode>> = {
+  w: "translate",
+  e: "rotate",
+  r: "scale",
 };
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -29,13 +29,29 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
+function isTransformShortcutTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    target.closest("[data-transform-shortcuts]") !== null
+  );
+}
+
+type SceneAnnouncement = {
+  id: number;
+  message: string;
+};
+
 export function EditorApp() {
   const [sceneDocument] = useState(() => new SceneDocument());
   const objects = useSceneSnapshot(sceneDocument);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [transformMode, setTransformMode] =
     useState<TransformMode>("translate");
+  const [isTransforming, setIsTransforming] = useState(false);
   const isTransformingRef = useRef(false);
+  const announcementSequenceRef = useRef(0);
+  const [sceneAnnouncement, setSceneAnnouncement] =
+    useState<SceneAnnouncement | null>(null);
   const [collaborationStatus, setCollaborationStatus] =
     useState<CollaborationStatus>("connecting");
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
@@ -43,6 +59,20 @@ export function EditorApp() {
 
   const selectedObject = objects.find((object) => object.id === selectedId) ?? null;
   const selectedObjectId = selectedObject?.id ?? null;
+
+  useEffect(
+    () =>
+      sceneDocument.subscribe(() => {
+        setSelectedId((currentId) => {
+          if (currentId === null) return null;
+          const stillExists = sceneDocument
+            .getSnapshot()
+            .some((object) => object.id === currentId);
+          return stillExists ? currentId : null;
+        });
+      }),
+    [sceneDocument],
+  );
 
   useEffect(() => {
     const developmentSocket =
@@ -81,16 +111,61 @@ export function EditorApp() {
 
   const deleteObject = useCallback(
     (objectId: string) => {
+      if (isTransformingRef.current) return;
+
+      const deletedIndex = objects.findIndex((object) => object.id === objectId);
+      const deletedObject = objects[deletedIndex];
+      const nextFocusId =
+        objects[deletedIndex + 1]?.id ?? objects[deletedIndex - 1]?.id ?? null;
+      const activeElement = document.activeElement;
+      const activeRow =
+        activeElement instanceof Element
+          ? activeElement.closest("[data-scene-object-row]")
+          : null;
+      const shouldMoveSceneFocus =
+        activeRow?.getAttribute("data-scene-object-row") === objectId;
+
       sceneDocument.apply({ type: "object.delete", objectId });
       setSelectedId((currentId) => (currentId === objectId ? null : currentId));
+
+      if (deletedObject) {
+        announcementSequenceRef.current += 1;
+        setSceneAnnouncement({
+          id: announcementSequenceRef.current,
+          message: `${deletedObject.name} 삭제됨`,
+        });
+      }
+
+      if (shouldMoveSceneFocus) {
+        window.setTimeout(() => {
+          const sceneButtons = Array.from(
+            document.querySelectorAll<HTMLElement>("[data-scene-object-select]"),
+          );
+          const nextButton = sceneButtons.find(
+            (button) => button.dataset.sceneObjectSelect === nextFocusId,
+          );
+          const addButton = document.querySelector<HTMLElement>(
+            '[data-add-primitive="box"]',
+          );
+          (nextButton ?? addButton)?.focus();
+        });
+      }
     },
-    [sceneDocument],
+    [objects, sceneDocument],
   );
 
-  const undo = useCallback(() => sceneDocument.undo(), [sceneDocument]);
-  const redo = useCallback(() => sceneDocument.redo(), [sceneDocument]);
+  const undo = useCallback(() => {
+    if (!isTransformingRef.current) sceneDocument.undo();
+  }, [sceneDocument]);
+  const redo = useCallback(() => {
+    if (!isTransformingRef.current) sceneDocument.redo();
+  }, [sceneDocument]);
+  const changeTransformMode = useCallback((mode: TransformMode) => {
+    if (!isTransformingRef.current) setTransformMode(mode);
+  }, []);
   const handleTransformingChange = useCallback((isTransforming: boolean) => {
     isTransformingRef.current = isTransforming;
+    setIsTransforming(isTransforming);
   }, []);
 
   useEffect(() => {
@@ -107,9 +182,11 @@ export function EditorApp() {
       const hasCommandModifier = event.ctrlKey || event.metaKey;
       const hasDirectModifier =
         hasCommandModifier || event.altKey || event.shiftKey;
+      const key = event.key.toLowerCase();
+      const allowsTransformShortcut = isTransformShortcutTarget(event.target);
 
-      if (event.code === "Escape" && !hasDirectModifier) {
-        if (selectedObjectId !== null || isTransformingRef.current) {
+      if (event.key === "Escape" && !hasDirectModifier) {
+        if (selectedId !== null || isTransformingRef.current) {
           event.preventDefault();
           setSelectedId(null);
         }
@@ -120,15 +197,17 @@ export function EditorApp() {
         hasCommandModifier &&
         !event.altKey &&
         !event.shiftKey &&
-        event.code === "KeyZ";
+        key === "z";
       const isRedo =
         hasCommandModifier &&
         !event.altKey &&
-        ((event.shiftKey && event.code === "KeyZ") ||
-          (!event.shiftKey && event.code === "KeyY"));
-      const transformModeForKey = TRANSFORM_MODE_BY_CODE[event.code];
-      const isDelete = event.code === "Delete" || event.code === "Backspace";
-      const isTransformShortcut = Boolean(transformModeForKey) && !hasDirectModifier;
+        ((event.shiftKey && key === "z") || (!event.shiftKey && key === "y"));
+      const transformModeForKey = TRANSFORM_MODE_BY_KEY[key];
+      const isDelete = event.key === "Delete" || event.key === "Backspace";
+      const isTransformShortcut =
+        Boolean(transformModeForKey) &&
+        !hasDirectModifier &&
+        allowsTransformShortcut;
       const isDeleteShortcut = isDelete && !hasDirectModifier;
 
       if (isTransformingRef.current) {
@@ -150,9 +229,13 @@ export function EditorApp() {
       }
       if (hasDirectModifier) return;
 
-      if (transformModeForKey && selectedObjectId !== null) {
+      if (
+        transformModeForKey &&
+        selectedObjectId !== null &&
+        allowsTransformShortcut
+      ) {
         event.preventDefault();
-        setTransformMode(transformModeForKey);
+        changeTransformMode(transformModeForKey);
         return;
       }
       if (isDelete && selectedObjectId !== null) {
@@ -163,7 +246,7 @@ export function EditorApp() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [deleteObject, redo, selectedObjectId, undo]);
+  }, [changeTransformMode, deleteObject, redo, selectedId, selectedObjectId, undo]);
 
   const exportScene = useCallback(() => {
     const blob = new Blob([sceneDocument.exportJson()], {
@@ -183,6 +266,7 @@ export function EditorApp() {
         collaborators={collaborators}
         collaborationStatus={collaborationStatus}
         rendererName={rendererName}
+        historyDisabled={isTransforming}
         onUndo={undo}
         onRedo={redo}
         onExport={exportScene}
@@ -191,6 +275,8 @@ export function EditorApp() {
         <ScenePanel
           objects={objects}
           selectedId={selectedObjectId}
+          announcement={sceneAnnouncement}
+          deleteDisabled={isTransforming}
           onSelect={setSelectedId}
           onAdd={addPrimitive}
           onDelete={deleteObject}
@@ -200,9 +286,10 @@ export function EditorApp() {
             objects={objects}
             selectedId={selectedObjectId}
             transformMode={transformMode}
+            isTransforming={isTransforming}
             onSelect={setSelectedId}
             onTransform={transformObject}
-            onTransformModeChange={setTransformMode}
+            onTransformModeChange={changeTransformMode}
             onTransformingChange={handleTransformingChange}
             onRendererChange={setRendererName}
           />

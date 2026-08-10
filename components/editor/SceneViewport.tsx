@@ -16,6 +16,7 @@ type SceneViewportProps = {
   objects: SceneObject[];
   selectedId: string | null;
   transformMode: TransformMode;
+  isTransforming: boolean;
   onSelect: (objectId: string | null) => void;
   onTransform: (objectId: string, updates: SceneObjectUpdates) => void;
   onTransformModeChange: (mode: TransformMode) => void;
@@ -36,6 +37,8 @@ type ViewportRuntime = {
   objectGroup: THREE.Group;
   selectionHelper: THREE.BoxHelper | null;
   isCancellingTransform: boolean;
+  activePointerIds: Set<number>;
+  suspendOrbitUntilPointersUp: boolean;
 };
 
 type TransformSnapshot = Pick<SceneObject, "position" | "rotation" | "scale"> & {
@@ -78,11 +81,12 @@ function disposeSelectionHelper(runtime: ViewportRuntime): void {
 
 function cancelActiveTransform(runtime: ViewportRuntime): void {
   if (!runtime.transformControls.dragging) return;
+  runtime.suspendOrbitUntilPointersUp = runtime.activePointerIds.size > 0;
   runtime.isCancellingTransform = true;
   try {
     if (runtime.transformControls.object) runtime.transformControls.reset();
     runtime.transformControls.pointerUp(null);
-    runtime.controls.enabled = true;
+    runtime.controls.enabled = !runtime.suspendOrbitUntilPointersUp;
   } finally {
     runtime.isCancellingTransform = false;
   }
@@ -201,6 +205,16 @@ function vectorsMatch(left: Vector3Tuple, right: Vector3Tuple): boolean {
   return left.every((value, index) => Math.abs(value - right[index]) < 1e-6);
 }
 
+function mergeChangedComponents(
+  start: Vector3Tuple,
+  preview: Vector3Tuple,
+  latest: Vector3Tuple,
+): Vector3Tuple {
+  return preview.map((value, index) =>
+    Math.abs(value - start[index]) >= 1e-6 ? value : latest[index],
+  ) as Vector3Tuple;
+}
+
 function vectorIsFinite(vector: Vector3Tuple): boolean {
   return vector.every(Number.isFinite);
 }
@@ -215,6 +229,7 @@ export function SceneViewport({
   objects,
   selectedId,
   transformMode,
+  isTransforming,
   onSelect,
   onTransform,
   onTransformModeChange,
@@ -313,6 +328,8 @@ export function SceneViewport({
         objectGroup,
         selectionHelper: null,
         isCancellingTransform: false,
+        activePointerIds: new Set<number>(),
+        suspendOrbitUntilPointersUp: false,
       };
       runtimeRef.current = runtime;
       syncSceneObjects(runtime, objectsRef.current, selectedIdRef.current);
@@ -361,28 +378,51 @@ export function SceneViewport({
         }
 
         const current = readTransform(object);
-        const activeVector = current[
+        const activeField =
           event.mode === "translate"
             ? "position"
             : event.mode === "rotate"
               ? "rotation"
-              : "scale"
-        ];
-        if (!vectorIsFinite(activeVector)) {
+              : "scale";
+        const startVector = start[activeField];
+        const previewVector = current[activeField];
+        const latestObject = objectsRef.current.find(
+          (sceneObject) => sceneObject.id === current.objectId,
+        );
+        if (
+          !latestObject ||
+          !vectorIsFinite(previewVector) ||
+          vectorsMatch(startVector, previewVector)
+        ) {
           scheduleSceneResync();
-        } else if (event.mode === "translate" && !vectorsMatch(start.position, current.position)) {
-          onTransformRef.current(current.objectId, { position: current.position });
-        } else if (event.mode === "rotate" && !vectorsMatch(start.rotation, current.rotation)) {
-          onTransformRef.current(current.objectId, { rotation: current.rotation });
-        } else if (event.mode === "scale" && !vectorsMatch(start.scale, current.scale)) {
-          onTransformRef.current(current.objectId, { scale: current.scale });
-        } else {
-          scheduleSceneResync();
+          return;
         }
+
+        const mergedVector = mergeChangedComponents(
+          startVector,
+          previewVector,
+          latestObject[activeField],
+        );
+        if (
+          !vectorIsFinite(mergedVector) ||
+          vectorsMatch(latestObject[activeField], mergedVector)
+        ) {
+          scheduleSceneResync();
+          return;
+        }
+
+        const updates: SceneObjectUpdates =
+          activeField === "position"
+            ? { position: mergedVector }
+            : activeField === "rotation"
+              ? { rotation: mergedVector }
+              : { scale: mergedVector };
+        onTransformRef.current(current.objectId, updates);
+        scheduleSceneResync();
       };
       const onDraggingChanged = (event: { value: unknown }) => {
         const isDragging = Boolean(event.value);
-        controls.enabled = !isDragging;
+        controls.enabled = !isDragging && !runtime.suspendOrbitUntilPointersUp;
         onTransformingChangeRef.current(isDragging);
       };
       const onTransformObjectChange = () => {
@@ -407,6 +447,8 @@ export function SceneViewport({
 
       const onPointerDown = (event: PointerEvent) => {
         if (event.button !== 0) return;
+        runtime.activePointerIds.add(event.pointerId);
+        canvas.focus({ preventScroll: true });
         if (transformControls.dragging || transformControls.axis !== null) {
           suppressSelectionForPointer = true;
           pointerStart = null;
@@ -420,6 +462,14 @@ export function SceneViewport({
         };
       };
       const onPointerUp = (event: PointerEvent) => {
+        runtime.activePointerIds.delete(event.pointerId);
+        if (
+          runtime.activePointerIds.size === 0 &&
+          runtime.suspendOrbitUntilPointersUp
+        ) {
+          runtime.suspendOrbitUntilPointersUp = false;
+          controls.enabled = !transformControls.dragging;
+        }
         if (event.button !== 0) return;
         if (suppressSelectionForPointer) {
           suppressSelectionForPointer = false;
@@ -439,7 +489,12 @@ export function SceneViewport({
         const hit = raycaster.intersectObjects(objectGroup.children, false)[0];
         onSelectRef.current((hit?.object.userData.objectId as string | undefined) ?? null);
       };
-      const onPointerCancel = () => {
+      const onPointerCancel = (event: PointerEvent) => {
+        runtime.activePointerIds.delete(event.pointerId);
+        if (runtime.activePointerIds.size === 0) {
+          runtime.suspendOrbitUntilPointersUp = false;
+          controls.enabled = !transformControls.dragging;
+        }
         pointerStart = null;
         suppressSelectionForPointer = false;
         if (!transformControls.dragging) return;
@@ -479,6 +534,8 @@ export function SceneViewport({
       const runtime = runtimeRef.current;
       if (!runtime) return;
       runtime.renderer.setAnimationLoop(null);
+      runtime.activePointerIds.clear();
+      runtime.suspendOrbitUntilPointersUp = false;
       runtime.controls.enabled = true;
       runtime.controls.dispose();
       runtime.transformControls.detach();
@@ -493,8 +550,20 @@ export function SceneViewport({
   }, [onRendererChange]);
 
   return (
-    <div className="viewport-wrap">
-      <canvas ref={canvasRef} className="viewport-canvas" aria-label="3D 장면 뷰포트" />
+    <div className="viewport-wrap" data-transform-shortcuts>
+      <canvas
+        ref={canvasRef}
+        className="viewport-canvas"
+        aria-label="3D 장면 뷰포트"
+        aria-keyshortcuts={
+          isTransforming
+            ? "Escape"
+            : selectedId
+              ? "W E R Escape Delete Backspace"
+              : undefined
+        }
+        tabIndex={0}
+      />
       <div className="transform-toolbar" role="group" aria-label="트랜스폼 도구">
         {TRANSFORM_MODES.map(({ mode, label, shortcut, icon: Icon }) => (
           <button
@@ -502,8 +571,10 @@ export function SceneViewport({
             type="button"
             className={transformMode === mode ? "is-active" : ""}
             aria-pressed={selectedId !== null && transformMode === mode}
-            aria-keyshortcuts={shortcut}
-            disabled={selectedId === null}
+            aria-keyshortcuts={
+              selectedId !== null && !isTransforming ? shortcut : undefined
+            }
+            disabled={selectedId === null || isTransforming}
             title={`${label} (${shortcut})`}
             onClick={() => onTransformModeChange(mode)}
           >
@@ -513,9 +584,9 @@ export function SceneViewport({
           </button>
         ))}
       </div>
-      <div className="viewport-help">
+      <div className="viewport-help" role="status" aria-live="polite" aria-atomic="true">
         {selectedId
-          ? "W/E/R: 변형 모드 · Esc: 선택 해제 · Delete/Backspace: 삭제"
+          ? `현재 모드: ${TRANSFORM_MODES.find(({ mode }) => mode === transformMode)?.label} · 뷰포트/도구 포커스 후 W/E/R 전환 · Esc 해제 · Delete/Backspace 삭제`
           : "오브젝트 클릭: 선택 · 빈 공간 드래그: 회전 · 휠: 확대"}
       </div>
       <div className="view-cube" aria-hidden="true">

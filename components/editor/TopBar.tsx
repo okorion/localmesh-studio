@@ -5,6 +5,7 @@ type TopBarProps = {
   collaborators: Collaborator[];
   collaborationStatus: CollaborationStatus;
   rendererName: string;
+  historyDisabled: boolean;
   onUndo: () => void;
   onRedo: () => void;
   onExport: () => void;
@@ -32,6 +33,7 @@ export function TopBar({
   collaborators,
   collaborationStatus,
   rendererName,
+  historyDisabled,
   onUndo,
   onRedo,
   onExport,
@@ -53,7 +55,8 @@ export function TopBar({
           type="button"
           onClick={onUndo}
           aria-label="실행 취소"
-          aria-keyshortcuts="Control+Z Meta+Z"
+          aria-keyshortcuts={historyDisabled ? undefined : "Control+Z Meta+Z"}
+          disabled={historyDisabled}
           title="실행 취소 (Ctrl/⌘+Z)"
         >
           <Undo2 size={17} />
@@ -63,7 +66,12 @@ export function TopBar({
           type="button"
           onClick={onRedo}
           aria-label="다시 실행"
-          aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z Control+Y Meta+Y"
+          aria-keyshortcuts={
+            historyDisabled
+              ? undefined
+              : "Control+Shift+Z Meta+Shift+Z Control+Y Meta+Y"
+          }
+          disabled={historyDisabled}
           title="다시 실행 (Ctrl/⌘+Shift+Z 또는 Ctrl/⌘+Y)"
         >
           <Redo2 size={17} />

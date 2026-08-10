@@ -2,11 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { connectSceneSession, type Collaborator, type CollaborationStatus } from "@/features/collaboration/connect-scene-session";
+import {
+  CsgError,
+  evaluateCsg,
+  getCsgOperandSignature,
+  type CsgOperation,
+} from "@/features/scene/csg";
 import { SceneDocument } from "@/features/scene/scene-document";
 import { createSceneObject, type PrimitiveKind } from "@/features/scene/schema";
 import { useSceneSnapshot } from "@/features/scene/use-scene-snapshot";
 import type { SceneCommand, SceneObjectUpdates } from "@/features/scene/commands";
 import { AiPanel } from "./AiPanel";
+import type { CsgStatus } from "./CsgPanel";
 import { InspectorPanel } from "./InspectorPanel";
 import { ScenePanel } from "./ScenePanel";
 import { SceneViewport, type TransformMode } from "./SceneViewport";
@@ -18,6 +25,37 @@ const TRANSFORM_MODE_BY_KEY: Partial<Record<string, TransformMode>> = {
   e: "rotate",
   r: "scale",
 };
+const CSG_OPERATION_LABELS: Record<CsgOperation, string> = {
+  union: "합집합",
+  subtract: "차집합 (A − B)",
+  intersect: "교집합",
+};
+
+class CsgUiError extends Error {}
+
+function getCsgErrorMessage(error: unknown): string {
+  if (error instanceof CsgUiError) return error.message;
+  if (!(error instanceof CsgError)) {
+    return "CSG 계산에 실패해 원본 오브젝트를 유지했습니다.";
+  }
+
+  switch (error.code) {
+    case "INVALID_OPERATION":
+      return "지원하지 않는 CSG 연산입니다. 다른 연산을 선택하세요.";
+    case "INVALID_INPUT":
+      return "A와 B 입력을 확인할 수 없어 원본을 유지했습니다.";
+    case "INVALID_SCALE":
+      return "A 또는 B의 크기 값이 CSG 허용 범위를 벗어났습니다.";
+    case "INVALID_GEOMETRY":
+      return "A 또는 B의 형상 데이터가 올바르지 않아 계산하지 못했습니다.";
+    case "EMPTY_RESULT":
+      return "CSG 결과가 비어 있어 원본 오브젝트를 유지했습니다.";
+    case "RESULT_TOO_COMPLEX":
+      return "CSG 결과가 너무 복잡해 적용하지 않았습니다. 더 단순한 형상으로 다시 시도하세요.";
+    case "ENGINE_FAILURE":
+      return "CSG 엔진이 계산을 완료하지 못해 원본 오브젝트를 유지했습니다.";
+  }
+}
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -45,10 +83,18 @@ export function EditorApp() {
   const [sceneDocument] = useState(() => new SceneDocument());
   const objects = useSceneSnapshot(sceneDocument);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [csgSecondaryId, setCsgSecondaryId] = useState<string | null>(null);
+  const [isCsgProcessing, setIsCsgProcessing] = useState(false);
+  const [csgStatus, setCsgStatus] = useState<CsgStatus | null>(null);
   const [transformMode, setTransformMode] =
     useState<TransformMode>("translate");
   const [isTransforming, setIsTransforming] = useState(false);
   const isTransformingRef = useRef(false);
+  const isCsgProcessingRef = useRef(false);
+  const selectedIdRef = useRef<string | null>(null);
+  const csgSecondaryIdRef = useRef<string | null>(null);
+  const csgRunSequenceRef = useRef(0);
+  const csgStatusSequenceRef = useRef(0);
   const announcementSequenceRef = useRef(0);
   const [sceneAnnouncement, setSceneAnnouncement] =
     useState<SceneAnnouncement | null>(null);
@@ -60,18 +106,73 @@ export function EditorApp() {
   const selectedObject = objects.find((object) => object.id === selectedId) ?? null;
   const selectedObjectId = selectedObject?.id ?? null;
 
+  const selectCsgSecondary = useCallback((objectId: string | null) => {
+    const nextId =
+      objectId !== null && objectId !== selectedIdRef.current
+        ? objectId
+        : null;
+    csgSecondaryIdRef.current = nextId;
+    setCsgSecondaryId(nextId);
+  }, []);
+
+  const selectObject = useCallback((objectId: string | null) => {
+    selectedIdRef.current = objectId;
+    setSelectedId(objectId);
+    if (
+      objectId === null ||
+      objectId === csgSecondaryIdRef.current
+    ) {
+      csgSecondaryIdRef.current = null;
+      setCsgSecondaryId(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedObjectId;
+    csgSecondaryIdRef.current = csgSecondaryId;
+  }, [csgSecondaryId, objects, selectedObjectId]);
+
+  useEffect(() => {
+    setCsgSecondaryId((currentId) => {
+      const remainsValid =
+        selectedObjectId !== null &&
+        currentId !== null &&
+        currentId !== selectedObjectId &&
+        objects.some((object) => object.id === currentId);
+      if (remainsValid) return currentId;
+      csgSecondaryIdRef.current = null;
+      return null;
+    });
+  }, [objects, selectedObjectId]);
+
+  useEffect(
+    () => () => {
+      csgRunSequenceRef.current += 1;
+      isCsgProcessingRef.current = false;
+    },
+    [],
+  );
+
   useEffect(
     () =>
       sceneDocument.subscribe(() => {
-        setSelectedId((currentId) => {
-          if (currentId === null) return null;
-          const stillExists = sceneDocument
-            .getSnapshot()
-            .some((object) => object.id === currentId);
-          return stillExists ? currentId : null;
-        });
+        const snapshot = sceneDocument.getSnapshot();
+        const currentPrimaryId = selectedIdRef.current;
+        const currentSecondaryId = csgSecondaryIdRef.current;
+        if (
+          currentPrimaryId !== null &&
+          !snapshot.some((object) => object.id === currentPrimaryId)
+        ) {
+          selectObject(null);
+        }
+        if (
+          currentSecondaryId !== null &&
+          !snapshot.some((object) => object.id === currentSecondaryId)
+        ) {
+          selectCsgSecondary(null);
+        }
       }),
-    [sceneDocument],
+    [sceneDocument, selectCsgSecondary, selectObject],
   );
 
   useEffect(() => {
@@ -88,30 +189,35 @@ export function EditorApp() {
 
   const addPrimitive = useCallback(
     (kind: PrimitiveKind) => {
+      if (isCsgProcessingRef.current) return;
       const object = createSceneObject(kind, {
         position: [objects.length * 0.35 - 0.35, kind === "sphere" ? 0.75 : 0.5, 0],
       });
       sceneDocument.apply({ type: "object.create", object });
-      setSelectedId(object.id);
+      selectObject(object.id);
     },
-    [objects.length, sceneDocument],
+    [objects.length, sceneDocument, selectObject],
   );
 
   const applyCommand = useCallback(
-    (command: SceneCommand) => sceneDocument.apply(command),
+    (command: SceneCommand) => {
+      if (!isCsgProcessingRef.current) sceneDocument.apply(command);
+    },
     [sceneDocument],
   );
 
   const transformObject = useCallback(
     (objectId: string, updates: SceneObjectUpdates) => {
-      sceneDocument.apply({ type: "object.update", objectId, updates });
+      if (!isCsgProcessingRef.current) {
+        sceneDocument.apply({ type: "object.update", objectId, updates });
+      }
     },
     [sceneDocument],
   );
 
   const deleteObject = useCallback(
     (objectId: string) => {
-      if (isTransformingRef.current) return;
+      if (isTransformingRef.current || isCsgProcessingRef.current) return;
 
       const deletedIndex = objects.findIndex((object) => object.id === objectId);
       const deletedObject = objects[deletedIndex];
@@ -126,7 +232,8 @@ export function EditorApp() {
         activeRow?.getAttribute("data-scene-object-row") === objectId;
 
       sceneDocument.apply({ type: "object.delete", objectId });
-      setSelectedId((currentId) => (currentId === objectId ? null : currentId));
+      if (selectedIdRef.current === objectId) selectObject(null);
+      if (csgSecondaryIdRef.current === objectId) selectCsgSecondary(null);
 
       if (deletedObject) {
         announcementSequenceRef.current += 1;
@@ -151,14 +258,20 @@ export function EditorApp() {
         });
       }
     },
-    [objects, sceneDocument],
+    [objects, sceneDocument, selectCsgSecondary, selectObject],
   );
 
   const undo = useCallback(() => {
-    if (!isTransformingRef.current) sceneDocument.undo();
+    if (!isTransformingRef.current && !isCsgProcessingRef.current) {
+      sceneDocument.undo();
+      setCsgStatus(null);
+    }
   }, [sceneDocument]);
   const redo = useCallback(() => {
-    if (!isTransformingRef.current) sceneDocument.redo();
+    if (!isTransformingRef.current && !isCsgProcessingRef.current) {
+      sceneDocument.redo();
+      setCsgStatus(null);
+    }
   }, [sceneDocument]);
   const changeTransformMode = useCallback((mode: TransformMode) => {
     if (!isTransformingRef.current) setTransformMode(mode);
@@ -167,6 +280,119 @@ export function EditorApp() {
     isTransformingRef.current = isTransforming;
     setIsTransforming(isTransforming);
   }, []);
+
+  const runCsg = useCallback(
+    async (operation: CsgOperation) => {
+      if (isCsgProcessingRef.current || isTransformingRef.current) return;
+
+      const primaryId = selectedIdRef.current;
+      const secondaryId = csgSecondaryIdRef.current;
+      const currentObjects = sceneDocument.getSnapshot();
+      const primary = currentObjects.find((object) => object.id === primaryId);
+      const secondary = currentObjects.find(
+        (object) => object.id === secondaryId,
+      );
+      if (!primary || !secondary || primary.id === secondary.id) return;
+
+      const operandSignature = [
+        primary.id,
+        getCsgOperandSignature(primary),
+        secondary.id,
+        getCsgOperandSignature(secondary),
+      ].join("\u001f");
+      const runId = csgRunSequenceRef.current + 1;
+      csgRunSequenceRef.current = runId;
+      isCsgProcessingRef.current = true;
+      setIsCsgProcessing(true);
+      csgStatusSequenceRef.current += 1;
+      setCsgStatus({
+        id: csgStatusSequenceRef.current,
+        tone: "working",
+        message: `${primary.name} A와 ${secondary.name} B의 ${CSG_OPERATION_LABELS[operation]} 계산 중`,
+      });
+
+      try {
+        const result = await evaluateCsg(operation, primary, secondary);
+        if (csgRunSequenceRef.current !== runId) return;
+
+        const latestObjects = sceneDocument.getSnapshot();
+        const latestPrimary = latestObjects.find(
+          (object) => object.id === primary.id,
+        );
+        const latestSecondary = latestObjects.find(
+          (object) => object.id === secondary.id,
+        );
+        const latestSignature =
+          latestPrimary && latestSecondary
+            ? [
+                latestPrimary.id,
+                getCsgOperandSignature(latestPrimary),
+                latestSecondary.id,
+                getCsgOperandSignature(latestSecondary),
+              ].join("\u001f")
+            : null;
+        const operandsAreCurrent =
+          selectedIdRef.current === primary.id &&
+          csgSecondaryIdRef.current === secondary.id &&
+          latestSignature === operandSignature;
+
+        if (!operandsAreCurrent || isTransformingRef.current) {
+          throw new CsgUiError(
+            "계산 중 A 또는 B가 변경되어 결과를 적용하지 않았습니다. 다시 실행하세요.",
+          );
+        }
+        if (
+          result.kind !== "mesh" ||
+          result.geometry.positions.length < 9 ||
+          result.geometry.positions.length % 9 !== 0
+        ) {
+          throw new CsgUiError("CSG 결과가 비어 있어 원본을 유지했습니다.");
+        }
+
+        sceneDocument.applyMany(
+          [
+            { type: "object.delete", objectId: primary.id },
+            { type: "object.delete", objectId: secondary.id },
+            { type: "object.create", object: result },
+          ],
+          "user",
+        );
+        selectObject(result.id);
+        selectCsgSecondary(null);
+        csgStatusSequenceRef.current += 1;
+        setCsgStatus({
+          id: csgStatusSequenceRef.current,
+          tone: "success",
+          message: `${CSG_OPERATION_LABELS[operation]} 완료. ${result.name}을 선택했습니다.`,
+        });
+
+        window.setTimeout(() => {
+          const resultButton = Array.from(
+            document.querySelectorAll<HTMLElement>(
+              "[data-scene-object-select]",
+            ),
+          ).find(
+            (button) => button.dataset.sceneObjectSelect === result.id,
+          );
+          resultButton?.focus();
+        });
+      } catch (error: unknown) {
+        if (csgRunSequenceRef.current !== runId) return;
+        csgStatusSequenceRef.current += 1;
+        setCsgStatus({
+          id: csgStatusSequenceRef.current,
+          tone: "error",
+          message: getCsgErrorMessage(error),
+        });
+      } finally {
+        if (csgRunSequenceRef.current === runId) {
+          isCsgProcessingRef.current = false;
+          setIsCsgProcessing(false);
+        }
+      }
+    },
+    [sceneDocument, selectCsgSecondary, selectObject],
+  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -188,7 +414,7 @@ export function EditorApp() {
       if (event.key === "Escape" && !hasDirectModifier) {
         if (selectedId !== null || isTransformingRef.current) {
           event.preventDefault();
-          setSelectedId(null);
+          selectObject(null);
         }
         return;
       }
@@ -210,7 +436,7 @@ export function EditorApp() {
         allowsTransformShortcut;
       const isDeleteShortcut = isDelete && !hasDirectModifier;
 
-      if (isTransformingRef.current) {
+      if (isTransformingRef.current || isCsgProcessingRef.current) {
         if (isUndo || isRedo || isTransformShortcut || isDeleteShortcut) {
           event.preventDefault();
         }
@@ -246,7 +472,15 @@ export function EditorApp() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [changeTransformMode, deleteObject, redo, selectedId, selectedObjectId, undo]);
+  }, [
+    changeTransformMode,
+    deleteObject,
+    redo,
+    selectObject,
+    selectedId,
+    selectedObjectId,
+    undo,
+  ]);
 
   const exportScene = useCallback(() => {
     const blob = new Blob([sceneDocument.exportJson()], {
@@ -266,7 +500,7 @@ export function EditorApp() {
         collaborators={collaborators}
         collaborationStatus={collaborationStatus}
         rendererName={rendererName}
-        historyDisabled={isTransforming}
+        historyDisabled={isTransforming || isCsgProcessing}
         onUndo={undo}
         onRedo={redo}
         onExport={exportScene}
@@ -275,9 +509,16 @@ export function EditorApp() {
         <ScenePanel
           objects={objects}
           selectedId={selectedObjectId}
+          csgSecondaryId={csgSecondaryId}
+          csgStatus={csgStatus}
+          isCsgProcessing={isCsgProcessing}
           announcement={sceneAnnouncement}
-          deleteDisabled={isTransforming}
-          onSelect={setSelectedId}
+          deleteDisabled={isTransforming || isCsgProcessing}
+          editDisabled={isCsgProcessing}
+          isTransforming={isTransforming}
+          onSelect={selectObject}
+          onCsgSecondaryChange={selectCsgSecondary}
+          onCsgRun={(operation) => void runCsg(operation)}
           onAdd={addPrimitive}
           onDelete={deleteObject}
         />
@@ -285,20 +526,48 @@ export function EditorApp() {
           <SceneViewport
             objects={objects}
             selectedId={selectedObjectId}
+            csgSecondaryId={csgSecondaryId}
             transformMode={transformMode}
             isTransforming={isTransforming}
-            onSelect={setSelectedId}
+            interactionLocked={isCsgProcessing}
+            onSelect={selectObject}
             onTransform={transformObject}
             onTransformModeChange={changeTransformMode}
             onTransformingChange={handleTransformingChange}
             onRendererChange={setRendererName}
           />
-          <AiPanel
-            objects={objects}
-            onApply={(commands) => sceneDocument.applyMany(commands, "ai")}
-          />
+          <div
+            className={`editor-lock-region ai-lock-region ${isCsgProcessing ? "is-locked" : ""}`}
+            aria-disabled={isCsgProcessing}
+            inert={isCsgProcessing ? true : undefined}
+            title={
+              isCsgProcessing
+                ? "CSG 계산이 끝난 뒤 AI 명령을 적용하세요."
+                : undefined
+            }
+          >
+            <AiPanel
+              objects={objects}
+              onApply={(commands) => {
+                if (!isCsgProcessingRef.current) {
+                  sceneDocument.applyMany(commands, "ai");
+                }
+              }}
+            />
+          </div>
         </section>
-        <InspectorPanel object={selectedObject} onCommand={applyCommand} />
+        <div
+          className={`editor-lock-region inspector-lock-region ${isCsgProcessing ? "is-locked" : ""}`}
+          aria-disabled={isCsgProcessing}
+          inert={isCsgProcessing ? true : undefined}
+          title={
+            isCsgProcessing
+              ? "CSG 계산이 끝난 뒤 속성을 편집하세요."
+              : undefined
+          }
+        >
+          <InspectorPanel object={selectedObject} onCommand={applyCommand} />
+        </div>
       </div>
     </main>
   );

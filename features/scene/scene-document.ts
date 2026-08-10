@@ -89,9 +89,12 @@ export class SceneDocument {
   }
 
   applyMany(commands: SceneCommand[], origin: CommandOrigin): void {
+    const parsedCommands = structuredClone(
+      commands.map((command) => sceneCommandSchema.parse(command)),
+    );
+
     this.doc.transact(() => {
-      for (const command of commands) {
-        const parsed = sceneCommandSchema.parse(command);
+      for (const parsed of parsedCommands) {
         if (parsed.type === "object.create") {
           this.objects.set(parsed.object.id, this.toYMap(parsed.object));
         } else if (parsed.type === "object.delete") {
@@ -116,7 +119,7 @@ export class SceneDocument {
 
   exportJson(): string {
     return JSON.stringify(
-      { format: "localmesh.scene", version: 1, objects: this.snapshot },
+      { format: "localmesh.scene", version: 2, objects: this.snapshot },
       null,
       2,
     );
@@ -143,7 +146,7 @@ export class SceneDocument {
   private toYMap(object: SceneObject): Y.Map<unknown> {
     const map = new Y.Map<unknown>();
     for (const [key, value] of Object.entries(object)) {
-      map.set(key, Array.isArray(value) ? [...value] : value);
+      map.set(key, structuredClone(value));
     }
     return map;
   }

@@ -22,6 +22,18 @@ Local AI ┘                                         ├─> IndexedDB
 
 Three.js Mesh를 직접 저장하거나 React 상태와 Yjs 상태를 양방향 복제하지 않습니다. 이 규칙이 데이터 불일치와 수정 위치의 모호함을 막습니다.
 
+### CSG 결과 데이터
+
+CSG 입력 A는 일반 오브젝트 선택으로 정하고 B는 CSG UI에서 별도로 명시합니다. 합집합(A ∪ B), 차집합(A − B), 교집합(A ∩ B) 계산이 성공하면 결과 `BufferGeometry`를 `kind: "mesh"`인 custom `SceneObject`의 로컬 좌표로 bake합니다. Yjs와 LocalMesh JSON v2에는 렌더링과 후속 CSG에 필요한 `geometry.positions`, `geometry.normals`, `geometry.operation`을 저장하며, Three.js `BufferGeometry` 인스턴스 자체는 저장하지 않습니다.
+
+두 입력 삭제와 결과 생성은 하나의 Yjs transaction으로 적용합니다. 따라서 관찰자는 중간 상태를 보지 않고, 사용자는 한 번의 Undo/Redo로 두 원본과 결과를 전환합니다. 빈 geometry, 비유한 좌표·법선, 삼각형 예산 초과, 라이브러리 예외 또는 계산 중 입력 변경은 transaction 전에 실패시키므로 원본 A와 B를 보존합니다. 성공한 custom mesh는 프리미티브와 같은 Transform 경로를 쓰며 다음 CSG의 입력으로 다시 bake할 수 있습니다.
+
+연산·서로 다른 두 오브젝트·0.01 이상 100 이하의 양의 유한 scale·position/normal attribute·index·전체 draw range·유한한 attribute 값·입력별 20,000개 삼각형 예산을 먼저 검증합니다. 검증을 통과한 뒤에만 `three-bvh-csg`를 dynamic import해 초기 편집기 번들 비용을 분리합니다. 엔진 출력은 활성 draw range의 index만 순회해 non-indexed 배열로 bake합니다. 출력은 20,000개 삼각형, 즉 positions와 normals 각각 180,000개 scalar를 넘지 않아야 하며, bounding box의 세 축 extent가 각각 1e-6보다 커야 합니다. 이 조건을 충족하지 못한 결과는 빈 결과로 취급합니다.
+
+입력 geometry는 닫힌 two-manifold라는 라이브러리 전제를 충족해야 합니다. 이 전제를 만족해도 라이브러리가 실험 단계이고 부동소수점 수치 오차와 코너 케이스가 있으므로 결과의 완전한 two-manifold를 보장하지 않습니다.
+
+CSG 교체는 문서 단위로 원자적이지만 동일한 입력 A/B를 두 클라이언트가 동시에 연산하는 의도를 직렬화하거나 잠그지는 않습니다. 각 transaction의 입력 삭제는 병합되더라도 서로 다른 ID의 baked 결과가 모두 남을 수 있는 잔여 리스크가 있습니다.
+
 ### Transform 동시 편집
 
 외부 `SceneObject` 스키마와 JSON 내보내기는 `position`, `rotation`, `scale`을 3개 값의 tuple로 유지합니다. Yjs 내부에서는 기존 tuple을 기준값으로 두고 실제로 변경된 X/Y/Z 성분만 `position.x`와 같은 독립 키에 기록합니다. 따라서 두 클라이언트가 서로 다른 축을 동시에 바꿔도 한쪽 변경이 다른 축을 덮지 않으며, 한 사용자의 Undo가 다른 사용자의 축 변경이나 오브젝트 필수 필드를 제거하지 않습니다.
@@ -46,3 +58,4 @@ Three.js Mesh를 직접 저장하거나 React 상태와 Yjs 상태를 양방향 
 - 새 AI 공급자: `SceneAiProvider`를 구현하고 공급자 선택 UI에 등록
 - 새 협업 저장소: Hocuspocus 서버 extension으로 추가하고 클라이언트는 수정하지 않음
 - 새 프리미티브: schema, geometry factory, 생성 UI 세 곳을 수정
+- 새 CSG 연산: `features/scene/csg.ts`의 검증·실행 경계와 원자 적용 경로를 함께 수정하고, AI 명령 경로에는 자동으로 노출하지 않음

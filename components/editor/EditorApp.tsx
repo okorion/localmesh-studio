@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { connectSceneSession, type Collaborator, type CollaborationStatus } from "@/features/collaboration/connect-scene-session";
 import { SceneDocument } from "@/features/scene/scene-document";
 import { createSceneObject, type PrimitiveKind } from "@/features/scene/schema";
 import { useSceneSnapshot } from "@/features/scene/use-scene-snapshot";
-import type { SceneCommand } from "@/features/scene/commands";
+import type { SceneCommand, SceneObjectUpdates } from "@/features/scene/commands";
 import { AiPanel } from "./AiPanel";
 import { InspectorPanel } from "./InspectorPanel";
 import { ScenePanel } from "./ScenePanel";
@@ -23,10 +23,7 @@ export function EditorApp() {
   const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
   const [rendererName, setRendererName] = useState("준비 중");
 
-  const selectedObject = useMemo(
-    () => objects.find((object) => object.id === selectedId) ?? objects[0] ?? null,
-    [objects, selectedId],
-  );
+  const selectedObject = objects.find((object) => object.id === selectedId) ?? null;
 
   useEffect(() => {
     const developmentSocket =
@@ -53,6 +50,13 @@ export function EditorApp() {
 
   const applyCommand = useCallback(
     (command: SceneCommand) => sceneDocument.apply(command),
+    [sceneDocument],
+  );
+
+  const transformObject = useCallback(
+    (objectId: string, updates: SceneObjectUpdates) => {
+      sceneDocument.apply({ type: "object.update", objectId, updates });
+    },
     [sceneDocument],
   );
 
@@ -94,6 +98,7 @@ export function EditorApp() {
             objects={objects}
             selectedId={selectedObject?.id ?? null}
             onSelect={setSelectedId}
+            onTransform={transformObject}
             onRendererChange={setRendererName}
           />
           <AiPanel

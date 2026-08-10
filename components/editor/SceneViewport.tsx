@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Move3D, Rotate3D, Scale3D } from "lucide-react";
 import * as THREE from "three";
 import { WebGPURenderer } from "three/webgpu";
@@ -15,10 +15,15 @@ import type { SceneObjectUpdates } from "@/features/scene/commands";
 type SceneViewportProps = {
   objects: SceneObject[];
   selectedId: string | null;
+  transformMode: TransformMode;
   onSelect: (objectId: string | null) => void;
   onTransform: (objectId: string, updates: SceneObjectUpdates) => void;
+  onTransformModeChange: (mode: TransformMode) => void;
+  onTransformingChange: (isTransforming: boolean) => void;
   onRendererChange: (rendererName: string) => void;
 };
+
+export type TransformMode = "translate" | "rotate" | "scale";
 
 type Renderer = THREE.WebGLRenderer | WebGPURenderer;
 type ViewportRuntime = {
@@ -38,12 +43,13 @@ type TransformSnapshot = Pick<SceneObject, "position" | "rotation" | "scale"> & 
 };
 
 const TRANSFORM_MODES = [
-  { mode: "translate", label: "이동", icon: Move3D },
-  { mode: "rotate", label: "회전", icon: Rotate3D },
-  { mode: "scale", label: "크기", icon: Scale3D },
+  { mode: "translate", label: "이동", shortcut: "W", icon: Move3D },
+  { mode: "rotate", label: "회전", shortcut: "E", icon: Rotate3D },
+  { mode: "scale", label: "크기", shortcut: "R", icon: Scale3D },
 ] satisfies Array<{
-  mode: TransformControlsMode;
+  mode: TransformMode;
   label: string;
+  shortcut: string;
   icon: typeof Move3D;
 }>;
 
@@ -208,8 +214,11 @@ function clampGizmoScale(value: number, fallback: number): number {
 export function SceneViewport({
   objects,
   selectedId,
+  transformMode,
   onSelect,
   onTransform,
+  onTransformModeChange,
+  onTransformingChange,
   onRendererChange,
 }: SceneViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -218,18 +227,18 @@ export function SceneViewport({
   const selectedIdRef = useRef(selectedId);
   const onSelectRef = useRef(onSelect);
   const onTransformRef = useRef(onTransform);
-  const transformModeRef = useRef<TransformControlsMode>("translate");
-  const [transformMode, setTransformMode] =
-    useState<TransformControlsMode>("translate");
+  const onTransformingChangeRef = useRef(onTransformingChange);
+  const transformModeRef = useRef<TransformMode>(transformMode);
 
   useEffect(() => {
     objectsRef.current = objects;
     selectedIdRef.current = selectedId;
     onSelectRef.current = onSelect;
     onTransformRef.current = onTransform;
+    onTransformingChangeRef.current = onTransformingChange;
     const runtime = runtimeRef.current;
     if (runtime) syncSceneObjects(runtime, objects, selectedId);
-  }, [objects, selectedId, onSelect, onTransform]);
+  }, [objects, selectedId, onSelect, onTransform, onTransformingChange]);
 
   useEffect(() => {
     transformModeRef.current = transformMode;
@@ -372,7 +381,9 @@ export function SceneViewport({
         }
       };
       const onDraggingChanged = (event: { value: unknown }) => {
-        controls.enabled = !Boolean(event.value);
+        const isDragging = Boolean(event.value);
+        controls.enabled = !isDragging;
+        onTransformingChangeRef.current(isDragging);
       };
       const onTransformObjectChange = () => {
         if (
@@ -477,6 +488,7 @@ export function SceneViewport({
       for (const object of runtime.objectGroup.children) disposeObject(object);
       runtime.renderer.dispose();
       runtimeRef.current = null;
+      onTransformingChangeRef.current(false);
     };
   }, [onRendererChange]);
 
@@ -484,23 +496,26 @@ export function SceneViewport({
     <div className="viewport-wrap">
       <canvas ref={canvasRef} className="viewport-canvas" aria-label="3D 장면 뷰포트" />
       <div className="transform-toolbar" role="group" aria-label="트랜스폼 도구">
-        {TRANSFORM_MODES.map(({ mode, label, icon: Icon }) => (
+        {TRANSFORM_MODES.map(({ mode, label, shortcut, icon: Icon }) => (
           <button
             key={mode}
             type="button"
             className={transformMode === mode ? "is-active" : ""}
             aria-pressed={selectedId !== null && transformMode === mode}
+            aria-keyshortcuts={shortcut}
             disabled={selectedId === null}
-            onClick={() => setTransformMode(mode)}
+            title={`${label} (${shortcut})`}
+            onClick={() => onTransformModeChange(mode)}
           >
             <Icon size={16} />
             <span>{label}</span>
+            <kbd aria-hidden="true">{shortcut}</kbd>
           </button>
         ))}
       </div>
       <div className="viewport-help">
         {selectedId
-          ? "기즈모 드래그: 변형 · 빈 공간 드래그: 회전 · 휠: 확대"
+          ? "W/E/R: 변형 모드 · Esc: 선택 해제 · Delete/Backspace: 삭제"
           : "오브젝트 클릭: 선택 · 빈 공간 드래그: 회전 · 휠: 확대"}
       </div>
       <div className="view-cube" aria-hidden="true">

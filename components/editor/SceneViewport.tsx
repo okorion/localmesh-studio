@@ -11,12 +11,15 @@ import {
 } from "three/addons/controls/TransformControls.js";
 import type { SceneObject, Vector3Tuple } from "@/features/scene/schema";
 import type { SceneObjectUpdates } from "@/features/scene/commands";
+import { createSceneObjectGeometry } from "@/features/scene/geometry";
 
 type SceneViewportProps = {
   objects: SceneObject[];
   selectedId: string | null;
+  csgSecondaryId: string | null;
   transformMode: TransformMode;
   isTransforming: boolean;
+  interactionLocked: boolean;
   onSelect: (objectId: string | null) => void;
   onTransform: (objectId: string, updates: SceneObjectUpdates) => void;
   onTransformModeChange: (mode: TransformMode) => void;
@@ -36,6 +39,7 @@ type ViewportRuntime = {
   transformHelper: THREE.Object3D;
   objectGroup: THREE.Group;
   selectionHelper: THREE.BoxHelper | null;
+  secondarySelectionHelper: THREE.BoxHelper | null;
   isCancellingTransform: boolean;
   activePointerIds: Set<number>;
   suspendOrbitUntilPointersUp: boolean;
@@ -59,12 +63,6 @@ const TRANSFORM_MODES = [
 const MIN_GIZMO_SCALE = 0.01;
 const MAX_GIZMO_SCALE = 100;
 
-function createGeometry(kind: SceneObject["kind"]): THREE.BufferGeometry {
-  if (kind === "sphere") return new THREE.SphereGeometry(0.75, 40, 24);
-  if (kind === "cylinder") return new THREE.CylinderGeometry(0.65, 0.65, 1.5, 36);
-  return new THREE.BoxGeometry(1.35, 1.35, 1.35);
-}
-
 function disposeObject(object: THREE.Object3D): void {
   if (!(object instanceof THREE.Mesh)) return;
   object.geometry.dispose();
@@ -77,6 +75,13 @@ function disposeSelectionHelper(runtime: ViewportRuntime): void {
   runtime.scene.remove(runtime.selectionHelper);
   runtime.selectionHelper.dispose();
   runtime.selectionHelper = null;
+}
+
+function disposeSecondarySelectionHelper(runtime: ViewportRuntime): void {
+  if (!runtime.secondarySelectionHelper) return;
+  runtime.scene.remove(runtime.secondarySelectionHelper);
+  runtime.secondarySelectionHelper.dispose();
+  runtime.secondarySelectionHelper = null;
 }
 
 function cancelActiveTransform(runtime: ViewportRuntime): void {
@@ -92,7 +97,11 @@ function cancelActiveTransform(runtime: ViewportRuntime): void {
   }
 }
 
-function syncSelection(runtime: ViewportRuntime, selectedMesh?: THREE.Mesh): void {
+function syncSelection(
+  runtime: ViewportRuntime,
+  selectedMesh?: THREE.Mesh,
+  secondaryMesh?: THREE.Mesh,
+): void {
   if (
     runtime.transformControls.dragging &&
     runtime.transformControls.object !== selectedMesh
@@ -103,32 +112,44 @@ function syncSelection(runtime: ViewportRuntime, selectedMesh?: THREE.Mesh): voi
   if (!selectedMesh) {
     runtime.transformControls.detach();
     disposeSelectionHelper(runtime);
-    return;
-  }
-
-  if (runtime.transformControls.object !== selectedMesh) {
+  } else if (runtime.transformControls.object !== selectedMesh) {
     runtime.transformControls.attach(selectedMesh);
   }
 
-  if (runtime.selectionHelper?.object === selectedMesh) {
+  if (selectedMesh && runtime.selectionHelper?.object === selectedMesh) {
     runtime.selectionHelper.update();
-    return;
+  } else if (selectedMesh) {
+    disposeSelectionHelper(runtime);
+    const helper = new THREE.BoxHelper(selectedMesh, "#6f60e8");
+    helper.material.depthTest = false;
+    helper.material.transparent = true;
+    helper.material.opacity = 0.9;
+    helper.renderOrder = 2;
+    runtime.scene.add(helper);
+    runtime.selectionHelper = helper;
   }
 
-  disposeSelectionHelper(runtime);
-  const helper = new THREE.BoxHelper(selectedMesh, "#6f60e8");
-  helper.material.depthTest = false;
-  helper.material.transparent = true;
-  helper.material.opacity = 0.9;
-  helper.renderOrder = 2;
-  runtime.scene.add(helper);
-  runtime.selectionHelper = helper;
+  if (!secondaryMesh || secondaryMesh === selectedMesh) {
+    disposeSecondarySelectionHelper(runtime);
+  } else if (runtime.secondarySelectionHelper?.object === secondaryMesh) {
+    runtime.secondarySelectionHelper.update();
+  } else {
+    disposeSecondarySelectionHelper(runtime);
+    const helper = new THREE.BoxHelper(secondaryMesh, "#f59e0b");
+    helper.material.depthTest = false;
+    helper.material.transparent = true;
+    helper.material.opacity = 0.82;
+    helper.renderOrder = 2;
+    runtime.scene.add(helper);
+    runtime.secondarySelectionHelper = helper;
+  }
 }
 
 function syncSceneObjects(
   runtime: ViewportRuntime,
   objects: SceneObject[],
   selectedId: string | null,
+  csgSecondaryId: string | null,
 ): void {
   const { objectGroup: group, transformControls } = runtime;
   const existing = new Map(group.children.map((child) => [child.userData.objectId as string, child]));
@@ -156,7 +177,7 @@ function syncSceneObjects(
         disposeObject(mesh);
       }
       mesh = new THREE.Mesh(
-        createGeometry(object.kind),
+        createSceneObjectGeometry(object),
         new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.06 }),
       );
       mesh.castShadow = true;
@@ -174,8 +195,12 @@ function syncSceneObjects(
     }
     const material = mesh.material as THREE.MeshStandardMaterial;
     material.color.set(object.color);
-    material.emissive.set(selectedId === object.id ? "#3f2f9c" : "#000000");
-    material.emissiveIntensity = selectedId === object.id ? 0.38 : 0;
+    const isPrimary = selectedId === object.id;
+    const isSecondary = !isPrimary && csgSecondaryId === object.id;
+    material.emissive.set(
+      isPrimary ? "#3f2f9c" : isSecondary ? "#8a4b00" : "#000000",
+    );
+    material.emissiveIntensity = isPrimary ? 0.38 : isSecondary ? 0.3 : 0;
   }
 
   for (const staleObject of existing.values()) {
@@ -189,7 +214,13 @@ function syncSceneObjects(
         | THREE.Mesh
         | undefined)
     : undefined;
-  syncSelection(runtime, selectedMesh);
+  const secondaryMesh =
+    csgSecondaryId && csgSecondaryId !== selectedId
+      ? (group.children.find(
+          (child) => child.userData.objectId === csgSecondaryId,
+        ) as THREE.Mesh | undefined)
+      : undefined;
+  syncSelection(runtime, selectedMesh, secondaryMesh);
 }
 
 function readTransform(object: THREE.Object3D): TransformSnapshot {
@@ -228,8 +259,10 @@ function clampGizmoScale(value: number, fallback: number): number {
 export function SceneViewport({
   objects,
   selectedId,
+  csgSecondaryId,
   transformMode,
   isTransforming,
+  interactionLocked,
   onSelect,
   onTransform,
   onTransformModeChange,
@@ -240,25 +273,45 @@ export function SceneViewport({
   const runtimeRef = useRef<ViewportRuntime | null>(null);
   const objectsRef = useRef(objects);
   const selectedIdRef = useRef(selectedId);
+  const csgSecondaryIdRef = useRef(csgSecondaryId);
   const onSelectRef = useRef(onSelect);
   const onTransformRef = useRef(onTransform);
   const onTransformingChangeRef = useRef(onTransformingChange);
   const transformModeRef = useRef<TransformMode>(transformMode);
+  const interactionLockedRef = useRef(interactionLocked);
 
   useEffect(() => {
     objectsRef.current = objects;
     selectedIdRef.current = selectedId;
+    csgSecondaryIdRef.current = csgSecondaryId;
     onSelectRef.current = onSelect;
     onTransformRef.current = onTransform;
     onTransformingChangeRef.current = onTransformingChange;
     const runtime = runtimeRef.current;
-    if (runtime) syncSceneObjects(runtime, objects, selectedId);
-  }, [objects, selectedId, onSelect, onTransform, onTransformingChange]);
+    if (runtime) syncSceneObjects(runtime, objects, selectedId, csgSecondaryId);
+  }, [
+    csgSecondaryId,
+    objects,
+    selectedId,
+    onSelect,
+    onTransform,
+    onTransformingChange,
+  ]);
 
   useEffect(() => {
     transformModeRef.current = transformMode;
     runtimeRef.current?.transformControls.setMode(transformMode);
   }, [transformMode]);
+
+  useEffect(() => {
+    interactionLockedRef.current = interactionLocked;
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+    if (interactionLocked && runtime.transformControls.dragging) {
+      cancelActiveTransform(runtime);
+    }
+    runtime.transformControls.enabled = !interactionLocked;
+  }, [interactionLocked]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -303,6 +356,7 @@ export function SceneViewport({
       const transformControls = new TransformControls(camera, canvas);
       transformControls.setMode(transformModeRef.current);
       transformControls.setSize(0.82);
+      transformControls.enabled = !interactionLockedRef.current;
       const transformHelper = transformControls.getHelper();
       scene.add(transformHelper);
 
@@ -327,12 +381,18 @@ export function SceneViewport({
         transformHelper,
         objectGroup,
         selectionHelper: null,
+        secondarySelectionHelper: null,
         isCancellingTransform: false,
         activePointerIds: new Set<number>(),
         suspendOrbitUntilPointersUp: false,
       };
       runtimeRef.current = runtime;
-      syncSceneObjects(runtime, objectsRef.current, selectedIdRef.current);
+      syncSceneObjects(
+        runtime,
+        objectsRef.current,
+        selectedIdRef.current,
+        csgSecondaryIdRef.current,
+      );
 
       const resize = () => {
         const width = canvas.clientWidth;
@@ -354,7 +414,12 @@ export function SceneViewport({
       const scheduleSceneResync = () => {
         queueMicrotask(() => {
           if (disposed || runtimeRef.current !== runtime) return;
-          syncSceneObjects(runtime, objectsRef.current, selectedIdRef.current);
+          syncSceneObjects(
+            runtime,
+            objectsRef.current,
+            selectedIdRef.current,
+            csgSecondaryIdRef.current,
+          );
         });
       };
 
@@ -518,6 +583,7 @@ export function SceneViewport({
       renderer.setAnimationLoop(() => {
         controls.update();
         runtime.selectionHelper?.update();
+        runtime.secondarySelectionHelper?.update();
         renderer.render(scene, camera);
       });
     };
@@ -542,6 +608,7 @@ export function SceneViewport({
       runtime.scene.remove(runtime.transformHelper);
       runtime.transformControls.dispose();
       disposeSelectionHelper(runtime);
+      disposeSecondarySelectionHelper(runtime);
       for (const object of runtime.objectGroup.children) disposeObject(object);
       runtime.renderer.dispose();
       runtimeRef.current = null;
@@ -556,7 +623,9 @@ export function SceneViewport({
         className="viewport-canvas"
         aria-label="3D 장면 뷰포트"
         aria-keyshortcuts={
-          isTransforming
+          interactionLocked
+            ? undefined
+            : isTransforming
             ? "Escape"
             : selectedId
               ? "W E R Escape Delete Backspace"
@@ -572,10 +641,16 @@ export function SceneViewport({
             className={transformMode === mode ? "is-active" : ""}
             aria-pressed={selectedId !== null && transformMode === mode}
             aria-keyshortcuts={
-              selectedId !== null && !isTransforming ? shortcut : undefined
+              selectedId !== null && !isTransforming && !interactionLocked
+                ? shortcut
+                : undefined
             }
-            disabled={selectedId === null || isTransforming}
-            title={`${label} (${shortcut})`}
+            disabled={selectedId === null || isTransforming || interactionLocked}
+            title={
+              interactionLocked
+                ? "CSG 계산이 끝난 뒤 트랜스폼하세요."
+                : `${label} (${shortcut})`
+            }
             onClick={() => onTransformModeChange(mode)}
           >
             <Icon size={16} />
@@ -585,9 +660,11 @@ export function SceneViewport({
         ))}
       </div>
       <div className="viewport-help" role="status" aria-live="polite" aria-atomic="true">
-        {selectedId
-          ? `현재 모드: ${TRANSFORM_MODES.find(({ mode }) => mode === transformMode)?.label} · 뷰포트/도구 포커스 후 W/E/R 전환 · Esc 해제 · Delete/Backspace 삭제`
-          : "오브젝트 클릭: 선택 · 빈 공간 드래그: 회전 · 휠: 확대"}
+        {interactionLocked
+          ? "CSG 계산 중 · 장면 편집은 결과가 준비될 때까지 잠깁니다."
+          : selectedId
+            ? `현재 모드: ${TRANSFORM_MODES.find(({ mode }) => mode === transformMode)?.label} · 뷰포트/도구 포커스 후 W/E/R 전환 · Esc 해제 · Delete/Backspace 삭제`
+            : "오브젝트 클릭: 선택 · 빈 공간 드래그: 회전 · 휠: 확대"}
       </div>
       <div className="view-cube" aria-hidden="true">
         <span>TOP</span>

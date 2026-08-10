@@ -13,7 +13,8 @@
     "start": "vinext start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "check": "npm run typecheck && npm run lint && npm run build"
+    "test": "tsx --test \"features/**/*.test.ts\"",
+    "check": "npm run typecheck && npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "@hocuspocus/provider": "4.4.0",
@@ -25,6 +26,8 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "three": "0.185.1",
+    "three-bvh-csg": "0.0.18",
+    "three-mesh-bvh": "0.9.7",
     "y-indexeddb": "9.0.12",
     "yjs": "13.6.31",
     "zod": "4.4.3"

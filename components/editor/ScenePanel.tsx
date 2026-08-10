@@ -4,7 +4,7 @@ import type { PrimitiveKind, SceneObject } from "@/features/scene/schema";
 type ScenePanelProps = {
   objects: SceneObject[];
   selectedId: string | null;
-  onSelect: (objectId: string) => void;
+  onSelect: (objectId: string | null) => void;
   onAdd: (kind: PrimitiveKind) => void;
   onDelete: (objectId: string) => void;
 };
@@ -50,7 +50,12 @@ export function ScenePanel({
               role="treeitem"
               aria-selected={selectedId === object.id}
             >
-              <button className="tree-select" type="button" onClick={() => onSelect(object.id)}>
+              <button
+                className="tree-select"
+                type="button"
+                aria-pressed={selectedId === object.id}
+                onClick={() => onSelect(selectedId === object.id ? null : object.id)}
+              >
                 <span className="object-color" style={{ backgroundColor: object.color }} />
                 <span>{object.name}</span>
                 <small>{object.kind}</small>

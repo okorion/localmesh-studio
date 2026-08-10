@@ -8,8 +8,18 @@ import {
   getCsgOperandSignature,
   type CsgOperation,
 } from "@/features/scene/csg";
+import {
+  captureSceneObject,
+  createPastedSceneObject,
+  getSceneClipboardShortcut,
+  resolveSceneClipboardShortcut,
+} from "@/features/scene/clipboard";
 import { SceneDocument } from "@/features/scene/scene-document";
-import { createSceneObject, type PrimitiveKind } from "@/features/scene/schema";
+import {
+  createSceneObject,
+  type PrimitiveKind,
+  type SceneObject,
+} from "@/features/scene/schema";
 import { useSceneSnapshot } from "@/features/scene/use-scene-snapshot";
 import type { SceneCommand, SceneObjectUpdates } from "@/features/scene/commands";
 import { AiPanel } from "./AiPanel";
@@ -81,6 +91,16 @@ type SceneAnnouncement = {
   message: string;
 };
 
+type SceneClipboard = {
+  snapshot: SceneObject;
+  pasteCount: number;
+};
+
+function hasSelectedPageContent(): boolean {
+  const selection = window.getSelection();
+  return selection !== null && !selection.isCollapsed;
+}
+
 function yieldToPendingSceneUpdates(): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, 0));
 }
@@ -103,6 +123,8 @@ export function EditorApp() {
   const csgRunSequenceRef = useRef(0);
   const csgStatusSequenceRef = useRef(0);
   const announcementSequenceRef = useRef(0);
+  const sceneClipboardRef = useRef<SceneClipboard | null>(null);
+  const [hasSceneClipboard, setHasSceneClipboard] = useState(false);
   const [sceneAnnouncement, setSceneAnnouncement] =
     useState<SceneAnnouncement | null>(null);
   const [collaborationStatus, setCollaborationStatus] =
@@ -298,6 +320,52 @@ export function EditorApp() {
     [objects, sceneDocument, selectCsgSecondary, selectObject],
   );
 
+  const announceSceneChange = useCallback((message: string) => {
+    announcementSequenceRef.current += 1;
+    setSceneAnnouncement({
+      id: announcementSequenceRef.current,
+      message,
+    });
+  }, []);
+
+  const copySelectedObject = useCallback((): boolean => {
+    if (isTransformingRef.current || isCsgProcessingRef.current) return false;
+
+    const objectId = selectedIdRef.current;
+    const source = sceneDocument
+      .getSnapshot()
+      .find((object) => object.id === objectId);
+    if (!source) return false;
+
+    sceneClipboardRef.current = {
+      snapshot: captureSceneObject(source),
+      pasteCount: 0,
+    };
+    setHasSceneClipboard(true);
+    announceSceneChange(`${source.name} 복사됨`);
+    return true;
+  }, [announceSceneChange, sceneDocument]);
+
+  const pasteSceneObject = useCallback((): boolean => {
+    if (isTransformingRef.current || isCsgProcessingRef.current) return false;
+
+    const clipboard = sceneClipboardRef.current;
+    if (!clipboard) return false;
+
+    const pasteCount = clipboard.pasteCount + 1;
+    const pasted = createPastedSceneObject(
+      clipboard.snapshot,
+      sceneDocument.getSnapshot(),
+      pasteCount,
+    );
+    sceneDocument.apply({ type: "object.create", object: pasted }, "user");
+    clipboard.pasteCount = pasteCount;
+    setCsgStatus(null);
+    selectObject(pasted.id);
+    announceSceneChange(`${pasted.name} 붙여넣음`);
+    return true;
+  }, [announceSceneChange, sceneDocument, selectObject]);
+
   const undo = useCallback(() => {
     if (!isTransformingRef.current && !isCsgProcessingRef.current) {
       sceneDocument.undo();
@@ -446,11 +514,26 @@ export function EditorApp() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const editableTarget = isEditableTarget(event.target);
+      const clipboardChord = getSceneClipboardShortcut(event);
+      const clipboardShortcut = resolveSceneClipboardShortcut(event, {
+        hasClipboard: sceneClipboardRef.current !== null,
+        hasSelectedObject:
+          selectedIdRef.current !== null &&
+          sceneDocument
+            .getSnapshot()
+            .some((object) => object.id === selectedIdRef.current),
+        hasSelectedPageContent:
+          clipboardChord === "copy" && hasSelectedPageContent(),
+        interactionLocked:
+          isCsgProcessingRef.current || isTransformingRef.current,
+        isEditableTarget: editableTarget,
+      });
       if (
         event.defaultPrevented ||
         event.isComposing ||
         event.repeat ||
-        isEditableTarget(event.target)
+        editableTarget
       ) {
         return;
       }
@@ -500,7 +583,12 @@ export function EditorApp() {
       }
 
       if (isTransformingRef.current) {
-        if (isUndo || isRedo || isTransformShortcut || isDeleteShortcut) {
+        if (
+          isUndo ||
+          isRedo ||
+          isTransformShortcut ||
+          isDeleteShortcut
+        ) {
           event.preventDefault();
         }
         return;
@@ -514,6 +602,14 @@ export function EditorApp() {
       if (isRedo) {
         event.preventDefault();
         redo();
+        return;
+      }
+      if (clipboardShortcut === "copy") {
+        if (copySelectedObject()) event.preventDefault();
+        return;
+      }
+      if (clipboardShortcut === "paste") {
+        if (pasteSceneObject()) event.preventDefault();
         return;
       }
       if (hasDirectModifier) return;
@@ -537,8 +633,11 @@ export function EditorApp() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     changeTransformMode,
+    copySelectedObject,
     deleteObject,
+    pasteSceneObject,
     redo,
+    sceneDocument,
     selectObjectFromUser,
     selectedId,
     selectedObjectId,
@@ -564,6 +663,14 @@ export function EditorApp() {
         collaborationStatus={collaborationStatus}
         rendererName={rendererName}
         historyDisabled={isTransforming || isCsgProcessing}
+        copyDisabled={
+          selectedObjectId === null || isTransforming || isCsgProcessing
+        }
+        pasteDisabled={
+          !hasSceneClipboard || isTransforming || isCsgProcessing
+        }
+        onCopy={copySelectedObject}
+        onPaste={pasteSceneObject}
         onUndo={undo}
         onRedo={redo}
         onExport={exportScene}

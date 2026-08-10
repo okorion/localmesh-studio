@@ -1,4 +1,4 @@
-import { Download, Redo2, Undo2 } from "lucide-react";
+import { ClipboardPaste, Copy, Download, Redo2, Undo2 } from "lucide-react";
 import type { Collaborator, CollaborationStatus } from "@/features/collaboration/connect-scene-session";
 
 type TopBarProps = {
@@ -6,6 +6,10 @@ type TopBarProps = {
   collaborationStatus: CollaborationStatus;
   rendererName: string;
   historyDisabled: boolean;
+  copyDisabled: boolean;
+  pasteDisabled: boolean;
+  onCopy: () => void;
+  onPaste: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onExport: () => void;
@@ -34,6 +38,10 @@ export function TopBar({
   collaborationStatus,
   rendererName,
   historyDisabled,
+  copyDisabled,
+  pasteDisabled,
+  onCopy,
+  onPaste,
   onUndo,
   onRedo,
   onExport,
@@ -50,6 +58,28 @@ export function TopBar({
         </div>
       </div>
       <div className="toolbar" aria-label="편집 도구">
+        <button
+          className="icon-button"
+          type="button"
+          onClick={onCopy}
+          aria-label="선택한 오브젝트 복사"
+          aria-keyshortcuts={copyDisabled ? undefined : "Control+C Meta+C"}
+          disabled={copyDisabled}
+          title="오브젝트 복사 (Ctrl/⌘+C)"
+        >
+          <Copy size={17} />
+        </button>
+        <button
+          className="icon-button"
+          type="button"
+          onClick={onPaste}
+          aria-label="오브젝트 붙여넣기"
+          aria-keyshortcuts={pasteDisabled ? undefined : "Control+V Meta+V"}
+          disabled={pasteDisabled}
+          title="오브젝트 붙여넣기 (Ctrl/⌘+V)"
+        >
+          <ClipboardPaste size={17} />
+        </button>
         <button
           className="icon-button"
           type="button"

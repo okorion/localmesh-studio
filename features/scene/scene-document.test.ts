@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as Y from "yjs";
 import type { SceneCommand } from "./commands";
 import { SceneDocument } from "./scene-document";
 import { createSceneObject, sceneObjectSchema } from "./schema";
@@ -24,6 +25,7 @@ test("applyMany replaces operands atomically and supports undo and redo", () => 
       positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
       normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
       operation: "union",
+      topology: "csg-engine-output-v1",
     },
     position: [0, 0, 0],
     rotation: [0, 0, 0],
@@ -69,4 +71,31 @@ test("applyMany parses the complete batch before opening a transaction", () => {
 
   assert.throws(() => scene.applyMany(invalidBatch, "user"));
   assert.deepEqual(scene.getSnapshot(), []);
+});
+
+test("baked mesh geometry round-trips through a Yjs update", () => {
+  const source = new SceneDocument();
+  const mesh = sceneObjectSchema.parse({
+    id: "mesh-roundtrip",
+    name: "Mesh roundtrip",
+    kind: "mesh",
+    geometry: {
+      positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+      normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+      operation: "intersect",
+      topology: "csg-engine-output-v1",
+    },
+    position: [1, 2, 3],
+    rotation: [0.1, 0.2, 0.3],
+    scale: [1.5, 0.8, 2],
+    color: "#123456",
+    createdAt: 4,
+  });
+  source.apply({ type: "object.create", object: mesh }, "user");
+
+  const replicatedDoc = new Y.Doc();
+  Y.applyUpdate(replicatedDoc, Y.encodeStateAsUpdate(source.doc));
+  const replica = new SceneDocument(replicatedDoc);
+
+  assert.deepEqual(replica.getSnapshot(), [mesh]);
 });

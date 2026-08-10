@@ -22,6 +22,7 @@ export const meshGeometrySchema = z
     positions: meshAttributeSchema,
     normals: meshAttributeSchema,
     operation: csgOperationSchema,
+    topology: z.literal("csg-engine-output-v1"),
   })
   .superRefine((geometry, context) => {
     if (geometry.positions.length !== geometry.normals.length) {

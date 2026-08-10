@@ -48,6 +48,8 @@ function getCsgErrorMessage(error: unknown): string {
       return "A 또는 B의 크기 값이 CSG 허용 범위를 벗어났습니다.";
     case "INVALID_GEOMETRY":
       return "A 또는 B의 형상 데이터가 올바르지 않아 계산하지 못했습니다.";
+    case "INVALID_RESULT":
+      return "CSG 결과가 유효한 solid 조건을 충족하지 않아 원본 오브젝트를 유지했습니다.";
     case "EMPTY_RESULT":
       return "CSG 결과가 비어 있어 원본 오브젝트를 유지했습니다.";
     case "RESULT_TOO_COMPLEX":
@@ -79,6 +81,10 @@ type SceneAnnouncement = {
   message: string;
 };
 
+function yieldToPendingSceneUpdates(): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, 0));
+}
+
 export function EditorApp() {
   const [sceneDocument] = useState(() => new SceneDocument());
   const objects = useSceneSnapshot(sceneDocument);
@@ -91,6 +97,7 @@ export function EditorApp() {
   const [isTransforming, setIsTransforming] = useState(false);
   const isTransformingRef = useRef(false);
   const isCsgProcessingRef = useRef(false);
+  const hasRemoteCollaboratorsRef = useRef(false);
   const selectedIdRef = useRef<string | null>(null);
   const csgSecondaryIdRef = useRef<string | null>(null);
   const csgRunSequenceRef = useRef(0);
@@ -105,6 +112,7 @@ export function EditorApp() {
 
   const selectedObject = objects.find((object) => object.id === selectedId) ?? null;
   const selectedObjectId = selectedObject?.id ?? null;
+  const hasRemoteCollaborators = collaborators.length > 1;
 
   const selectCsgSecondary = useCallback((objectId: string | null) => {
     const nextId =
@@ -125,6 +133,29 @@ export function EditorApp() {
       csgSecondaryIdRef.current = null;
       setCsgSecondaryId(null);
     }
+  }, []);
+
+  const selectObjectFromUser = useCallback(
+    (objectId: string | null) => {
+      if (isCsgProcessingRef.current) return;
+      setCsgStatus(null);
+      selectObject(objectId);
+    },
+    [selectObject],
+  );
+
+  const selectCsgSecondaryFromUser = useCallback(
+    (objectId: string | null) => {
+      if (isCsgProcessingRef.current) return;
+      setCsgStatus(null);
+      selectCsgSecondary(objectId);
+    },
+    [selectCsgSecondary],
+  );
+
+  const handleCollaborators = useCallback((next: Collaborator[]) => {
+    hasRemoteCollaboratorsRef.current = next.length > 1;
+    setCollaborators(next);
   }, []);
 
   useEffect(() => {
@@ -183,13 +214,14 @@ export function EditorApp() {
       roomId: ROOM_ID,
       socketUrl: process.env.NEXT_PUBLIC_COLLABORATION_URL ?? developmentSocket,
       onStatus: setCollaborationStatus,
-      onCollaborators: setCollaborators,
+      onCollaborators: handleCollaborators,
     });
-  }, [sceneDocument]);
+  }, [handleCollaborators, sceneDocument]);
 
   const addPrimitive = useCallback(
     (kind: PrimitiveKind) => {
       if (isCsgProcessingRef.current) return;
+      setCsgStatus(null);
       const object = createSceneObject(kind, {
         position: [objects.length * 0.35 - 0.35, kind === "sphere" ? 0.75 : 0.5, 0],
       });
@@ -201,7 +233,10 @@ export function EditorApp() {
 
   const applyCommand = useCallback(
     (command: SceneCommand) => {
-      if (!isCsgProcessingRef.current) sceneDocument.apply(command);
+      if (!isCsgProcessingRef.current) {
+        setCsgStatus(null);
+        sceneDocument.apply(command);
+      }
     },
     [sceneDocument],
   );
@@ -209,6 +244,7 @@ export function EditorApp() {
   const transformObject = useCallback(
     (objectId: string, updates: SceneObjectUpdates) => {
       if (!isCsgProcessingRef.current) {
+        setCsgStatus(null);
         sceneDocument.apply({ type: "object.update", objectId, updates });
       }
     },
@@ -231,6 +267,7 @@ export function EditorApp() {
       const shouldMoveSceneFocus =
         activeRow?.getAttribute("data-scene-object-row") === objectId;
 
+      if (deletedObject) setCsgStatus(null);
       sceneDocument.apply({ type: "object.delete", objectId });
       if (selectedIdRef.current === objectId) selectObject(null);
       if (csgSecondaryIdRef.current === objectId) selectCsgSecondary(null);
@@ -283,7 +320,13 @@ export function EditorApp() {
 
   const runCsg = useCallback(
     async (operation: CsgOperation) => {
-      if (isCsgProcessingRef.current || isTransformingRef.current) return;
+      if (
+        isCsgProcessingRef.current ||
+        isTransformingRef.current ||
+        hasRemoteCollaboratorsRef.current
+      ) {
+        return;
+      }
 
       const primaryId = selectedIdRef.current;
       const secondaryId = csgSecondaryIdRef.current;
@@ -313,7 +356,14 @@ export function EditorApp() {
 
       try {
         const result = await evaluateCsg(operation, primary, secondary);
+        await yieldToPendingSceneUpdates();
         if (csgRunSequenceRef.current !== runId) return;
+
+        if (hasRemoteCollaboratorsRef.current) {
+          throw new CsgUiError(
+            "다른 협업자가 연결되어 결과를 적용하지 않았습니다. 단독 연결 상태에서 다시 실행하세요.",
+          );
+        }
 
         const latestObjects = sceneDocument.getSnapshot();
         const latestPrimary = latestObjects.find(
@@ -410,15 +460,7 @@ export function EditorApp() {
         hasCommandModifier || event.altKey || event.shiftKey;
       const key = event.key.toLowerCase();
       const allowsTransformShortcut = isTransformShortcutTarget(event.target);
-
-      if (event.key === "Escape" && !hasDirectModifier) {
-        if (selectedId !== null || isTransformingRef.current) {
-          event.preventDefault();
-          selectObject(null);
-        }
-        return;
-      }
-
+      const isEscape = event.key === "Escape" && !hasDirectModifier;
       const isUndo =
         hasCommandModifier &&
         !event.altKey &&
@@ -436,7 +478,28 @@ export function EditorApp() {
         allowsTransformShortcut;
       const isDeleteShortcut = isDelete && !hasDirectModifier;
 
-      if (isTransformingRef.current || isCsgProcessingRef.current) {
+      if (isCsgProcessingRef.current) {
+        if (
+          isEscape ||
+          isUndo ||
+          isRedo ||
+          isTransformShortcut ||
+          isDeleteShortcut
+        ) {
+          event.preventDefault();
+        }
+        return;
+      }
+
+      if (isEscape) {
+        if (selectedId !== null || isTransformingRef.current) {
+          event.preventDefault();
+          selectObjectFromUser(null);
+        }
+        return;
+      }
+
+      if (isTransformingRef.current) {
         if (isUndo || isRedo || isTransformShortcut || isDeleteShortcut) {
           event.preventDefault();
         }
@@ -476,7 +539,7 @@ export function EditorApp() {
     changeTransformMode,
     deleteObject,
     redo,
-    selectObject,
+    selectObjectFromUser,
     selectedId,
     selectedObjectId,
     undo,
@@ -512,12 +575,13 @@ export function EditorApp() {
           csgSecondaryId={csgSecondaryId}
           csgStatus={csgStatus}
           isCsgProcessing={isCsgProcessing}
+          csgCollaborationBlocked={hasRemoteCollaborators}
           announcement={sceneAnnouncement}
           deleteDisabled={isTransforming || isCsgProcessing}
           editDisabled={isCsgProcessing}
           isTransforming={isTransforming}
-          onSelect={selectObject}
-          onCsgSecondaryChange={selectCsgSecondary}
+          onSelect={selectObjectFromUser}
+          onCsgSecondaryChange={selectCsgSecondaryFromUser}
           onCsgRun={(operation) => void runCsg(operation)}
           onAdd={addPrimitive}
           onDelete={deleteObject}
@@ -530,7 +594,7 @@ export function EditorApp() {
             transformMode={transformMode}
             isTransforming={isTransforming}
             interactionLocked={isCsgProcessing}
-            onSelect={selectObject}
+            onSelect={selectObjectFromUser}
             onTransform={transformObject}
             onTransformModeChange={changeTransformMode}
             onTransformingChange={handleTransformingChange}
@@ -550,6 +614,7 @@ export function EditorApp() {
               objects={objects}
               onApply={(commands) => {
                 if (!isCsgProcessingRef.current) {
+                  setCsgStatus(null);
                   sceneDocument.applyMany(commands, "ai");
                 }
               }}

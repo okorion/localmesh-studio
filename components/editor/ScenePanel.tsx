@@ -9,6 +9,7 @@ type ScenePanelProps = {
   csgSecondaryId: string | null;
   csgStatus: CsgStatus | null;
   isCsgProcessing: boolean;
+  csgCollaborationBlocked: boolean;
   announcement: { id: number; message: string } | null;
   deleteDisabled: boolean;
   editDisabled: boolean;
@@ -32,6 +33,7 @@ export function ScenePanel({
   csgSecondaryId,
   csgStatus,
   isCsgProcessing,
+  csgCollaborationBlocked,
   announcement,
   deleteDisabled,
   editDisabled,
@@ -75,6 +77,7 @@ export function ScenePanel({
         secondaryId={csgSecondaryId}
         isProcessing={isCsgProcessing}
         isTransforming={isTransforming}
+        collaborationBlocked={csgCollaborationBlocked}
         status={csgStatus}
         onSecondaryChange={onCsgSecondaryChange}
         onRun={onCsgRun}
@@ -101,6 +104,12 @@ export function ScenePanel({
                 type="button"
                 aria-pressed={selectedId === object.id}
                 data-scene-object-select={object.id}
+                disabled={editDisabled}
+                title={
+                  editDisabled
+                    ? "CSG 계산이 끝난 뒤 선택을 변경하세요."
+                    : undefined
+                }
                 onClick={() => onSelect(selectedId === object.id ? null : object.id)}
               >
                 <span className="object-color" style={{ backgroundColor: object.color }} />

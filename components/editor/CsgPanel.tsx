@@ -14,19 +14,39 @@ type CsgPanelProps = {
   secondaryId: string | null;
   isProcessing: boolean;
   isTransforming: boolean;
+  collaborationBlocked: boolean;
   status: CsgStatus | null;
   onSecondaryChange: (objectId: string | null) => void;
   onRun: (operation: CsgOperation) => void;
 };
 
 const OPERATIONS = [
-  { operation: "union", label: "합집합", formula: "A ∪ B", icon: Combine },
-  { operation: "subtract", label: "차집합", formula: "A − B", icon: Split },
-  { operation: "intersect", label: "교집합", formula: "A ∩ B", icon: ScanSearch },
+  {
+    operation: "union",
+    label: "합집합",
+    formula: "A ∪ B",
+    accessibleLabel: "합집합, A와 B 합치기",
+    icon: Combine,
+  },
+  {
+    operation: "subtract",
+    label: "차집합",
+    formula: "A − B",
+    accessibleLabel: "차집합, A에서 B 빼기",
+    icon: Split,
+  },
+  {
+    operation: "intersect",
+    label: "교집합",
+    formula: "A ∩ B",
+    accessibleLabel: "교집합, A와 B의 겹치는 부분",
+    icon: ScanSearch,
+  },
 ] satisfies Array<{
   operation: CsgOperation;
   label: string;
   formula: string;
+  accessibleLabel: string;
   icon: typeof Combine;
 }>;
 
@@ -35,9 +55,13 @@ function getDisabledReason(
   secondary: SceneObject | null,
   isProcessing: boolean,
   isTransforming: boolean,
+  collaborationBlocked: boolean,
 ): string | null {
   if (isProcessing) return "CSG 결과를 계산하고 있습니다.";
   if (isTransforming) return "트랜스폼 조작을 마친 뒤 CSG를 실행하세요.";
+  if (collaborationBlocked) {
+    return "다른 협업자가 연결된 동안에는 CSG를 실행할 수 없습니다.";
+  }
   if (!primary) return "장면이나 뷰포트에서 A 오브젝트를 먼저 선택하세요.";
   if (!secondary) return "A와 다른 B 오브젝트를 선택하세요.";
   if (primary.id === secondary.id) return "A와 B는 서로 다른 오브젝트여야 합니다.";
@@ -50,6 +74,7 @@ export function CsgPanel({
   secondaryId,
   isProcessing,
   isTransforming,
+  collaborationBlocked,
   status,
   onSecondaryChange,
   onRun,
@@ -65,6 +90,7 @@ export function CsgPanel({
     secondary,
     isProcessing,
     isTransforming,
+    collaborationBlocked,
   );
   const statusId = "csg-status";
   const guidanceId = "csg-guidance";
@@ -120,24 +146,33 @@ export function CsgPanel({
       </div>
 
       <div className="csg-actions" role="group" aria-label="CSG 불리언 연산">
-        {OPERATIONS.map(({ operation, label, formula, icon: Icon }) => (
-          <button
-            key={operation}
-            type="button"
-            data-csg-operation={operation}
-            disabled={disabledReason !== null}
-            title={disabledReason ?? `${label} (${formula}) 실행`}
-            aria-describedby={`${guidanceId} ${status ? statusId : ""}`.trim()}
-            onClick={() => onRun(operation)}
-          >
-            <Icon size={14} aria-hidden="true" />
-            <span>{label}</span>
-            <small aria-hidden="true">{formula}</small>
-          </button>
-        ))}
+        {OPERATIONS.map(
+          ({ operation, label, formula, accessibleLabel, icon: Icon }) => (
+            <button
+              key={operation}
+              type="button"
+              data-csg-operation={operation}
+              aria-label={accessibleLabel}
+              disabled={disabledReason !== null}
+              title={disabledReason ?? `${label} (${formula}) 실행`}
+              aria-describedby={`${guidanceId} ${status ? statusId : ""}`.trim()}
+              onClick={() => onRun(operation)}
+            >
+              <Icon size={14} aria-hidden="true" />
+              <span>{label}</span>
+              <small aria-hidden="true">{formula}</small>
+            </button>
+          ),
+        )}
       </div>
 
-      <p id={guidanceId} className="csg-guidance">
+      <p
+        id={guidanceId}
+        className="csg-guidance"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
         {disabledReason ?? "실행하면 A와 B가 결과 오브젝트 하나로 교체됩니다."}
       </p>
       <p

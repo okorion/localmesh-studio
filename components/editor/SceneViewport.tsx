@@ -623,7 +623,9 @@ export function SceneViewport({
         className="viewport-canvas"
         aria-label="3D 장면 뷰포트"
         aria-keyshortcuts={
-          isTransforming || (interactionLocked && selectedId !== null)
+          interactionLocked
+            ? undefined
+            : isTransforming
             ? "Escape"
             : selectedId
               ? "W E R Escape Delete Backspace"

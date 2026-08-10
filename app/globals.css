@@ -369,7 +369,7 @@ select:focus-visible {
 }
 
 .tree-row.is-csg-secondary:not(.is-selected) .tree-select small {
-  color: #a96508;
+  color: #784700;
   font-weight: 700;
 }
 
@@ -583,7 +583,7 @@ select:focus-visible {
 .csg-actions button small {
   color: currentColor;
   font: 600 9px/1.1 var(--font-app-mono), monospace;
-  opacity: 0.8;
+  opacity: 1;
 }
 
 .csg-guidance,

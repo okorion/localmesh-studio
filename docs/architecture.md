@@ -24,15 +24,15 @@ Three.js Mesh를 직접 저장하거나 React 상태와 Yjs 상태를 양방향 
 
 ### CSG 결과 데이터
 
-CSG 입력 A는 일반 오브젝트 선택으로 정하고 B는 CSG UI에서 별도로 명시합니다. 합집합(A ∪ B), 차집합(A − B), 교집합(A ∩ B) 계산이 성공하면 결과 `BufferGeometry`를 `kind: "mesh"`인 custom `SceneObject`의 로컬 좌표로 bake합니다. Yjs와 LocalMesh JSON v2에는 렌더링과 후속 CSG에 필요한 `geometry.positions`, `geometry.normals`, `geometry.operation`을 저장하며, Three.js `BufferGeometry` 인스턴스 자체는 저장하지 않습니다.
+CSG 입력 A는 일반 오브젝트 선택으로 정하고 B는 CSG UI에서 별도로 명시합니다. 합집합(A ∪ B), 차집합(A − B), 교집합(A ∩ B) 계산이 성공하면 결과 `BufferGeometry`를 `kind: "mesh"`인 custom `SceneObject`의 로컬 좌표로 bake합니다. Yjs와 LocalMesh JSON v2에는 렌더링과 후속 CSG에 필요한 `geometry.positions`, `geometry.normals`, `geometry.operation`, `geometry.topology`를 저장하며, Three.js `BufferGeometry` 인스턴스 자체는 저장하지 않습니다. 현재 topology 표식은 앱이 생성한 CSG 엔진 결과임을 나타내는 `csg-engine-output-v1`입니다.
 
-두 입력 삭제와 결과 생성은 하나의 Yjs transaction으로 적용합니다. 따라서 관찰자는 중간 상태를 보지 않고, 사용자는 한 번의 Undo/Redo로 두 원본과 결과를 전환합니다. 빈 geometry, 비유한 좌표·법선, 삼각형 예산 초과, 라이브러리 예외 또는 계산 중 입력 변경은 transaction 전에 실패시키므로 원본 A와 B를 보존합니다. 성공한 custom mesh는 프리미티브와 같은 Transform 경로를 쓰며 다음 CSG의 입력으로 다시 bake할 수 있습니다.
+두 입력 삭제와 결과 생성은 하나의 Yjs transaction으로 적용합니다. 따라서 관찰자는 중간 상태를 보지 않고, 사용자는 한 번의 Undo/Redo로 두 원본과 결과를 전환합니다. 계산 직후 macrotask를 한 번 양보해 이미 대기 중인 Yjs 업데이트를 반영하고 operand signature를 다시 검사합니다. 빈 geometry, 비유한 좌표·법선, topology·삼각형 예산 초과, 라이브러리 예외, 계산 중 입력 변경 또는 다른 실시간 협업자 연결은 transaction 전에 실패시키므로 원본 A와 B를 보존합니다. 성공한 custom mesh는 프리미티브와 같은 Transform 경로를 쓰며 다음 CSG의 입력으로 다시 bake할 수 있습니다.
 
-연산·서로 다른 두 오브젝트·0.01 이상 100 이하의 양의 유한 scale·position/normal attribute·index·전체 draw range·유한한 attribute 값·입력별 20,000개 삼각형 예산을 먼저 검증합니다. 검증을 통과한 뒤에만 `three-bvh-csg`를 dynamic import해 초기 편집기 번들 비용을 분리합니다. 엔진 출력은 활성 draw range의 index만 순회해 non-indexed 배열로 bake합니다. 출력은 20,000개 삼각형, 즉 positions와 normals 각각 180,000개 scalar를 넘지 않아야 하며, bounding box의 세 축 extent가 각각 1e-6보다 커야 합니다. 이 조건을 충족하지 못한 결과는 빈 결과로 취급합니다.
+연산·서로 다른 두 오브젝트·0.01 이상 100 이하의 양의 유한 scale·position/normal attribute·index·전체 draw range·유한한 attribute 값·입력별 20,000개 삼각형 예산을 먼저 검증합니다. 프리미티브 입력은 position을 tolerance 기반으로 weld한 뒤 퇴화 삼각형이 없고 모든 방향 없는 edge가 반대 방향으로 정확히 두 번 쓰이며 비영 signed volume을 갖는지 엄격히 검사합니다. `csg-engine-output-v1` 표식이 있는 baked mesh 입력과 엔진 출력은 최소 네 면·유효 면적·bbox 중심 compensated signed volume을 확인하고, triangle-safe seam welding과 공간 grid 기반 T-junction 분할 뒤 가장 긴 불균형 edge 또는 연결된 불균형-edge 성분의 3D bbox span이 전체 bounding-box 최대 extent의 75%를 넘으면 거부합니다. 75% 기준은 ordered primitive·회전·비균일 scale·연쇄 CSG matrix의 측정 최댓값 70.1%와 coarse/subdivided missing-face cube의 100%를 분리합니다. 후보 탐색은 grid visit 100만 회와 vertex candidate 500만 회에서 중단합니다. 검증을 통과한 뒤에만 `three-bvh-csg`를 dynamic import해 초기 편집기 번들 비용을 분리합니다. 활성 draw range의 index만 순회해 non-indexed 배열로 bake하고, 출력은 20,000개 삼각형, 즉 positions와 normals 각각 180,000개 scalar를 넘지 않아야 합니다.
 
-입력 geometry는 닫힌 two-manifold라는 라이브러리 전제를 충족해야 합니다. 이 전제를 만족해도 라이브러리가 실험 단계이고 부동소수점 수치 오차와 코너 케이스가 있으므로 결과의 완전한 two-manifold를 보장하지 않습니다.
+프리미티브 입력은 닫힌 two-manifold라는 라이브러리 전제를 엄격히 확인합니다. 앱이 생성한 baked mesh와 출력의 edge·부피 sanity check는 큰 열린 면과 명백한 zero-volume 결과를 차단하지만, 75% 기준 이하의 열린 경계나 수치 seam을 완전한 manifold로 증명하거나 자기 교차를 판정하는 CAD validator는 아닙니다. 라이브러리도 실험 단계이므로 부동소수점 수치 오차와 코너 케이스까지 보장하지 않습니다.
 
-CSG 교체는 문서 단위로 원자적이지만 동일한 입력 A/B를 두 클라이언트가 동시에 연산하는 의도를 직렬화하거나 잠그지는 않습니다. 각 transaction의 입력 삭제는 병합되더라도 서로 다른 ID의 baked 결과가 모두 남을 수 있는 잔여 리스크가 있습니다.
+UI는 awareness에 다른 실시간 협업자가 있으면 파괴형 CSG를 비활성화합니다. 하지만 아직 도착하지 않은 오프라인 업데이트나 awareness가 보이지 않는 동시 실행에는 분산 lock이 없습니다. 이런 transaction이 나중에 병합되면 서로 다른 ID의 baked 결과가 모두 남을 수 있고, 한쪽 Undo 뒤 A/B 원본과 상대 결과가 함께 존재할 수 있습니다. 또한 v2 custom mesh를 공유하는 모든 클라이언트가 동일한 v2 스키마를 사용해야 하며 구 v1 클라이언트는 해당 객체를 snapshot에서 제외합니다. 운영 협업에는 schema handshake와 shared operation record/lock이 후속으로 필요합니다.
 
 ### Transform 동시 편집
 

@@ -88,14 +88,16 @@ npm run dev
 2. 뷰포트 또는 장면 목록에서 오브젝트를 선택합니다.
 3. 뷰포트의 기즈모 또는 오른쪽 Inspector에서 위치, 회전, 크기를 조정합니다.
 4. CSG가 필요하면 보라색으로 강조된 현재 선택을 A로 유지하고 CSG 패널의 목록에서 다른 오브젝트 B를 명시적으로 고릅니다. B는 뷰포트에서 amber 색상으로 함께 강조됩니다.
-5. `합집합 A ∪ B`, `차집합 A − B`, `교집합 A ∩ B` 중 하나를 실행합니다. 성공한 결과는 두 원본을 대체하는 custom mesh가 되어 A로 선택되며, 한 번의 Undo/Redo로 두 원본과 결과를 전환할 수 있습니다.
+5. 다른 실시간 협업자가 연결되지 않은 상태에서 `합집합 A ∪ B`, `차집합 A − B`, `교집합 A ∩ B` 중 하나를 실행합니다. 성공한 결과는 두 원본을 대체하는 custom mesh가 되어 A로 선택되며, 한 번의 Undo/Redo로 두 원본과 결과를 전환할 수 있습니다.
 6. 하단 AI 입력창에 `보라색 구를 오른쪽에 추가해줘`와 같은 명령을 입력하고, 생성된 명령을 확인한 뒤 승인합니다.
 7. 필요한 경우 LocalMesh JSON v2로 장면을 내보냅니다.
 
-CSG 결과가 비어 있거나 계산·검증에 실패하거나 계산 중 A/B가 변경되면 장면을 변경하지 않고 두 원본을 그대로 보존합니다. 성공한 custom mesh는 일반 오브젝트처럼 이동·회전·크기 조절할 수 있고, 다른 CSG 연산의 A 또는 B로 다시 사용할 수 있습니다. 입력 검증을 통과한 첫 실행에서만 `three-bvh-csg`를 지연 로드합니다. 입력은 닫힌 two-manifold 메시여야 하며, 각 입력 또는 출력이 20,000개 삼각형을 넘으면 적용하지 않습니다.
+CSG 결과가 비어 있거나 계산·topology 검증에 실패하거나 계산 중 A/B가 변경되면 장면을 변경하지 않고 두 원본을 그대로 보존합니다. 성공한 custom mesh는 일반 오브젝트처럼 이동·회전·크기 조절할 수 있고, 다른 CSG 연산의 A 또는 B로 다시 사용할 수 있습니다. 입력 검증을 통과한 첫 실행에서만 `three-bvh-csg`를 지연 로드합니다. 프리미티브 입력은 position welding 뒤 퇴화 삼각형·열린 edge·비영 부피 검사를 통과한 닫힌 two-manifold여야 합니다. 앱이 bake한 CSG mesh와 엔진 출력에는 `csg-engine-output-v1` topology 표식을 요구하고, 최소 면 수·유효 면적·bbox 중심 signed volume을 확인한 뒤 미세한 seam·T-junction을 tolerance 기반으로 정규화합니다. 가장 긴 열린 edge 또는 연결된 열린 경계의 span이 bounding-box 최대 변의 75%를 넘거나 체적이 없으면 거부합니다. 입력과 출력은 각각 20,000개 삼각형을 넘으면 적용하지 않습니다.
 
 > [!IMPORTANT]
-> `three-bvh-csg`는 실험 단계의 라이브러리입니다. two-manifold 입력이어도 수치 정밀도와 코너 케이스 때문에 결과가 완전한 two-manifold가 아닐 수 있습니다. 동일한 A/B에 여러 클라이언트가 동시에 CSG를 실행하는 경우에도 중복 결과가 남을 수 있으므로, 중요한 모델은 내보낸 파일을 별도로 검수하세요.
+> `three-bvh-csg`는 실험 단계의 라이브러리입니다. topology 검증을 통과해도 자기 교차·수치 정밀도 코너 케이스까지 CAD 수준으로 보장하지 않습니다. LocalMesh는 다른 실시간 협업자가 연결된 동안 CSG 실행을 막고 계산 직후 대기 중인 문서 업데이트를 처리한 다음 A/B를 재검증합니다. 그래도 아직 수신되지 않은 오프라인 변경과 동시에 실행된 CSG까지 합의하지는 못하므로, 병합 뒤 중복 결과나 한쪽 Undo 뒤 원본과 상대 결과가 함께 남을 수 있습니다. 중요한 모델은 내보낸 파일을 별도로 검수하세요.
+
+CSG custom mesh를 공유하는 협업 클라이언트는 모두 LocalMesh JSON v2 스키마를 지원하는 동일 버전을 사용해야 합니다. 구 v1 클라이언트는 `kind: "mesh"`를 표시하지 못합니다.
 
 첫 AI 실행에서는 모델 파일을 내려받아 브라우저에 캐시하므로 네트워크와 기기 성능에 따라 시간이 걸릴 수 있습니다.
 
@@ -114,7 +116,7 @@ W/E/R은 뷰포트와 트랜스폼 도구에 포커스가 있을 때만 동작�
 
 ### LocalMesh JSON v2
 
-내보내기 루트는 `{ "format": "localmesh.scene", "version": 2, "objects": [...] }`입니다. 프리미티브는 kind와 Transform을 유지하고, `kind: "mesh"`인 baked custom mesh는 다시 렌더링하고 CSG 입력으로 사용할 수 있도록 로컬 좌표계의 `geometry.positions`, `geometry.normals`, `geometry.operation`을 함께 저장합니다. positions와 normals는 유한한 숫자로 구성된 같은 길이의 배열이며, non-indexed 삼각형 단위이므로 길이가 9의 배수이고 각각 최대 180,000개 scalar입니다. operation은 `union`, `subtract`, `intersect` 중 하나입니다. v2는 이 custom geometry를 보존하기 위한 형식이며 glTF/GLB와의 호환 형식은 아닙니다.
+내보내기 루트는 `{ "format": "localmesh.scene", "version": 2, "objects": [...] }`입니다. 프리미티브는 kind와 Transform을 유지하고, `kind: "mesh"`인 baked custom mesh는 다시 렌더링하고 CSG 입력으로 사용할 수 있도록 로컬 좌표계의 `geometry.positions`, `geometry.normals`, `geometry.operation`, `geometry.topology`를 함께 저장합니다. positions와 normals는 유한한 숫자로 구성된 같은 길이의 배열이며, non-indexed 삼각형 단위이므로 길이가 9의 배수이고 각각 최대 180,000개 scalar입니다. operation은 `union`, `subtract`, `intersect` 중 하나이고 topology는 현재 `csg-engine-output-v1`입니다. v2는 이 custom geometry를 보존하기 위한 형식이며 glTF/GLB와의 호환 형식은 아닙니다.
 
 ## 수정 위치 안내
 
@@ -166,8 +168,8 @@ npm run check
 ## 현재 범위와 다음 단계
 
 - 현재 오브젝트: Box, Sphere, Cylinder, CSG로 생성한 baked custom mesh
-- 현재 CSG: 합집합, A − B 차집합, 교집합. AI 명령을 통한 CSG는 범위 밖
-- 현재 교환 형식: custom geometry의 positions/normals/operation을 포함하는 LocalMesh JSON v2 내보내기
+- 현재 CSG: 단독 실시간 연결 상태의 합집합, A − B 차집합, 교집합. AI 명령을 통한 CSG는 범위 밖
+- 현재 교환 형식: custom geometry의 positions/normals/operation/topology를 포함하는 LocalMesh JSON v2 내보내기
 - 다음 후보: glTF/GLB 가져오기·내보내기
 - 다음 후보: 인증된 협업 Room과 서버 영속 저장
 - 다음 후보: 로컬 모델과 외부 API 공급자 선택 UI
